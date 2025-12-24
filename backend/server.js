@@ -1139,6 +1139,19 @@ function validateExcelStructure(fileBuffer) {
 
 // Rota para upload e atualização da base de dados
 app.post('/api/upload-base', (req, res, next) => {
+  console.log('📥 [Upload] Requisição recebida para upload de base de dados');
+  console.log('📥 [Upload] Origin:', req.headers.origin);
+  console.log('📥 [Upload] Content-Type:', req.headers['content-type']);
+  
+  // Garantir headers CORS antes de processar
+  const origin = req.headers.origin;
+  if (origin) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+  } else {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+  }
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
+  
   upload.single('file')(req, res, (err) => {
     if (err) {
       console.error('❌ Erro no multer:', err);
@@ -1153,6 +1166,13 @@ app.post('/api/upload-base', (req, res, next) => {
         errorMessage = `Arquivo muito grande. O tamanho máximo permitido é ${maxSizeMB}MB. Seu arquivo excede esse limite.`;
       } else if (err.code === 'LIMIT_UNEXPECTED_FILE') {
         errorMessage = 'Nome do campo do arquivo incorreto. Use "file" como nome do campo.';
+      }
+      
+      // Garantir headers CORS na resposta de erro
+      if (origin) {
+        res.setHeader('Access-Control-Allow-Origin', origin);
+      } else {
+        res.setHeader('Access-Control-Allow-Origin', '*');
       }
       
       return res.status(400).json({
@@ -1278,6 +1298,15 @@ app.post('/api/upload-base', (req, res, next) => {
     const stats = await fsPromises.stat(newBasePath);
     const lastModified = stats.mtime;
 
+    // Garantir headers CORS na resposta de sucesso
+    const origin = req.headers.origin;
+    if (origin) {
+      res.setHeader('Access-Control-Allow-Origin', origin);
+    } else {
+      res.setHeader('Access-Control-Allow-Origin', '*');
+    }
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+    
     // Retornar resposta imediatamente
     res.json({
       success: true,
@@ -1291,7 +1320,16 @@ app.post('/api/upload-base', (req, res, next) => {
     });
   } catch (err) {
     console.error('❌ Erro ao fazer upload da base de dados:', err);
-    console.error('Stack trace:', err.stack);
+    console.error('❌ Stack trace:', err.stack);
+    
+    // Garantir headers CORS mesmo em caso de erro
+    const origin = req.headers.origin;
+    if (origin) {
+      res.setHeader('Access-Control-Allow-Origin', origin);
+    } else {
+      res.setHeader('Access-Control-Allow-Origin', '*');
+    }
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
     
     // Garantir que sempre retorna JSON
     if (!res.headersSent) {
@@ -1635,12 +1673,34 @@ app.use((req, res) => {
 app.use((err, req, res, next) => {
   console.error('❌ [Error] Erro não tratado:', err);
   console.error('❌ [Error] Stack:', err.stack);
+  
+  // Garantir headers CORS mesmo em erro global
+  const origin = req.headers.origin;
+  if (origin) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+  } else {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+  }
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
+  
   if (!res.headersSent) {
     res.status(500).json({ 
       success: false, 
       error: err.message || 'Erro interno do servidor' 
     });
   }
+});
+
+// Tratamento de erros não capturados do processo
+process.on('uncaughtException', (err) => {
+  console.error('❌ [Fatal] Erro não capturado:', err);
+  console.error('❌ [Fatal] Stack:', err.stack);
+  // Não encerrar o processo, apenas logar
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('❌ [Fatal] Promise rejeitada não tratada:', reason);
+  // Não encerrar o processo, apenas logar
 });
 
 // Iniciar servidor - escutar em 0.0.0.0 para aceitar conexões externas (Railway)
