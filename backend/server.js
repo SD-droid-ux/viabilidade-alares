@@ -19,43 +19,20 @@ console.log('🔧 [Config] FRONTEND_URL:', process.env.FRONTEND_URL || 'Não con
 console.log('🔧 [Config] DATA_DIR:', process.env.DATA_DIR || './data');
 
 // Middleware CORS - Configuração robusta para produção
-const allowedOrigins = [];
-if (process.env.FRONTEND_URL) {
-  // Adicionar URL do frontend se configurada
-  allowedOrigins.push(process.env.FRONTEND_URL);
-  // Também adicionar sem protocolo se necessário
-  const urlWithoutProtocol = process.env.FRONTEND_URL.replace(/^https?:\/\//, '');
-  allowedOrigins.push(`https://${urlWithoutProtocol}`);
-  allowedOrigins.push(`http://${urlWithoutProtocol}`);
-}
-
-// Permitir todas as origens em desenvolvimento ou se não houver FRONTEND_URL configurado
+// Permitir todas as origens por padrão (pode ser restringido depois se necessário)
 const corsOptions = {
   origin: function (origin, callback) {
-    // Permitir requisições sem origin (Postman, curl, etc)
-    if (!origin) {
-      return callback(null, true);
-    }
+    // Log para debug
+    console.log('🌐 [CORS] Requisição recebida de origem:', origin || 'Sem origem (Postman/curl)');
     
-    // Se não há origens específicas configuradas, permitir todas
-    if (allowedOrigins.length === 0) {
-      return callback(null, true);
-    }
-    
-    // Verificar se a origem está na lista de permitidas
-    if (allowedOrigins.some(allowed => origin.includes(allowed.replace(/^https?:\/\//, '')))) {
-      callback(null, true);
-    } else {
-      // Log para debug
-      console.log('⚠️ CORS: Origem bloqueada:', origin);
-      console.log('⚠️ CORS: Origens permitidas:', allowedOrigins);
-      // Permitir mesmo assim para evitar bloqueios (pode ser ajustado para produção)
-      callback(null, true);
-    }
+    // Permitir todas as origens
+    // Se quiser restringir depois, adicione a lógica aqui
+    callback(null, true);
   },
   credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+  exposedHeaders: ['Content-Length', 'Content-Type']
 };
 
 app.use(cors(corsOptions));
@@ -1477,6 +1454,18 @@ app.get('/api/vi-ala/ensure-base', async (req, res) => {
 app.get('/api/vi-ala/test', (req, res) => {
   console.log('📥 [API] Teste recebido');
   res.json({ success: true, message: 'Servidor está respondendo', timestamp: new Date().toISOString() });
+});
+
+// Rota de teste simples para verificar CORS e conectividade
+app.get('/api/test', (req, res) => {
+  console.log('📥 [API] Teste de conectividade recebido');
+  console.log('📥 [API] Origin:', req.headers.origin);
+  res.json({ 
+    success: true, 
+    message: 'Backend está funcionando!', 
+    timestamp: new Date().toISOString(),
+    origin: req.headers.origin || 'N/A'
+  });
 });
 
 // Rota para obter próximo VI ALA
