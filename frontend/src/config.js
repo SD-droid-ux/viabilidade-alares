@@ -14,7 +14,8 @@ export function getApiUrl(path) {
     const base = API_BASE_URL.replace(/\/$/, '');
     const cleanPath = path.startsWith('/') ? path : `/${path}`;
     const fullUrl = `${base}${cleanPath}`;
-    console.log('🔗 [API] Usando VITE_API_URL:', fullUrl);
+    console.log('🔗 [API] VITE_API_URL configurada:', API_BASE_URL);
+    console.log('🔗 [API] URL final construída:', fullUrl);
     return fullUrl;
   }
   
