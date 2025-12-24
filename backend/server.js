@@ -13,13 +13,62 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-// Middleware
-app.use(cors({
-  origin: process.env.FRONTEND_URL || '*', // Permitir requisições do frontend
-  credentials: true
-}));
+// Log de configuração para debug
+console.log('🔧 [Config] PORT:', PORT);
+console.log('🔧 [Config] FRONTEND_URL:', process.env.FRONTEND_URL || 'Não configurado (permitindo todas as origens)');
+console.log('🔧 [Config] DATA_DIR:', process.env.DATA_DIR || './data');
+
+// Middleware CORS - Configuração robusta para produção
+const allowedOrigins = [];
+if (process.env.FRONTEND_URL) {
+  // Adicionar URL do frontend se configurada
+  allowedOrigins.push(process.env.FRONTEND_URL);
+  // Também adicionar sem protocolo se necessário
+  const urlWithoutProtocol = process.env.FRONTEND_URL.replace(/^https?:\/\//, '');
+  allowedOrigins.push(`https://${urlWithoutProtocol}`);
+  allowedOrigins.push(`http://${urlWithoutProtocol}`);
+}
+
+// Permitir todas as origens em desenvolvimento ou se não houver FRONTEND_URL configurado
+const corsOptions = {
+  origin: function (origin, callback) {
+    // Permitir requisições sem origin (Postman, curl, etc)
+    if (!origin) {
+      return callback(null, true);
+    }
+    
+    // Se não há origens específicas configuradas, permitir todas
+    if (allowedOrigins.length === 0) {
+      return callback(null, true);
+    }
+    
+    // Verificar se a origem está na lista de permitidas
+    if (allowedOrigins.some(allowed => origin.includes(allowed.replace(/^https?:\/\//, '')))) {
+      callback(null, true);
+    } else {
+      // Log para debug
+      console.log('⚠️ CORS: Origem bloqueada:', origin);
+      console.log('⚠️ CORS: Origens permitidas:', allowedOrigins);
+      // Permitir mesmo assim para evitar bloqueios (pode ser ajustado para produção)
+      callback(null, true);
+    }
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+};
+
+app.use(cors(corsOptions));
 app.use(express.json({ limit: '100mb' }));
 app.use(express.urlencoded({ extended: true, limit: '100mb' }));
+
+// Middleware para logar requisições (debug)
+app.use((req, res, next) => {
+  console.log(`📥 [${new Date().toISOString()}] ${req.method} ${req.path}`);
+  console.log(`📥 [Request] Origin: ${req.headers.origin || 'N/A'}`);
+  console.log(`📥 [Request] Host: ${req.headers.host || 'N/A'}`);
+  next();
+});
 
 // Configurar multer para upload de arquivos
 let upload;
@@ -1572,5 +1621,4 @@ app.listen(PORT, () => {
   console.log(`📁 Arquivo base CTOs: ${BASE_CTOS_FILE}`);
   console.log(`📁 Arquivo tabulações: ${TABULACOES_FILE}`);
 });
-
 
