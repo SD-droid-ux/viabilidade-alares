@@ -13,7 +13,9 @@ export function getApiUrl(path) {
   if (API_BASE_URL && API_BASE_URL.trim() !== '') {
     const base = API_BASE_URL.replace(/\/$/, '');
     const cleanPath = path.startsWith('/') ? path : `/${path}`;
-    return `${base}${cleanPath}`;
+    const fullUrl = `${base}${cleanPath}`;
+    console.log('🔗 [API] Usando VITE_API_URL:', fullUrl);
+    return fullUrl;
   }
   
   // Detectar automaticamente a URL do backend
@@ -31,6 +33,18 @@ export function getApiUrl(path) {
         // Modo produção - precisa da URL completa
         return `http://${hostname}:3001${path}`;
       }
+    }
+    
+    // Detectar Railway
+    const isRailway = hostname.includes('.railway.app') || hostname.includes('.up.railway.app');
+    
+    if (isRailway) {
+      // Em Railway, tenta substituir "frontend" por "backend" no hostname
+      // Ex: viabilidade-alares-frontend-production.up.railway.app -> viabilidade-alares-backend-production.up.railway.app
+      const backendHostname = hostname.replace(/frontend/i, 'backend');
+      const fullUrl = `${protocol}//${backendHostname}${path}`;
+      console.log('🔗 [API] Detectado Railway, usando:', fullUrl);
+      return fullUrl;
     }
     
     // Em Replit ou outros ambientes de produção
@@ -57,6 +71,7 @@ export function getApiUrl(path) {
   }
   
   // Fallback: usa path relativo (pode funcionar se backend estiver na mesma origem)
+  console.warn('⚠️ [API] Não foi possível determinar URL do backend, usando path relativo:', path);
   return path;
 }
 
