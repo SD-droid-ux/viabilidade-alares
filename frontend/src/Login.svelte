@@ -37,7 +37,10 @@
     
     // Validar credenciais com o backend
     try {
-      const response = await fetch(getApiUrl('/api/auth/login'), {
+      const apiUrl = getApiUrl('/api/auth/login');
+      console.log('🔗 [Login] Tentando conectar em:', apiUrl);
+      
+      const response = await fetch(apiUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -48,7 +51,16 @@
         }),
       });
 
+      console.log('📥 [Login] Resposta recebida:', response.status, response.statusText);
+      
+      if (!response.ok) {
+        console.error('❌ [Login] Erro HTTP:', response.status, response.statusText);
+        loginError = `Erro ao conectar: ${response.status} ${response.statusText}`;
+        return;
+      }
+
       const data = await response.json();
+      console.log('📦 [Login] Dados recebidos:', data);
 
       if (!data.success) {
         loginError = data.error || 'Usuário ou senha incorretos';
@@ -61,8 +73,17 @@
         localStorage.setItem('usuario', loginForm.usuario.trim());
       }
     } catch (err) {
-      console.error('Erro ao validar login:', err);
-      loginError = 'Erro ao conectar com o servidor. Tente novamente.';
+      console.error('❌ [Login] Erro ao validar login:', err);
+      console.error('❌ [Login] Tipo do erro:', err.name);
+      console.error('❌ [Login] Mensagem:', err.message);
+      
+      if (err.name === 'TypeError' && err.message.includes('Failed to fetch')) {
+        loginError = 'Não foi possível conectar ao servidor. Verifique se o backend está online.';
+      } else if (err.name === 'SyntaxError') {
+        loginError = 'Resposta inválida do servidor. Tente novamente.';
+      } else {
+        loginError = `Erro ao conectar: ${err.message}`;
+      }
       return;
     }
 
