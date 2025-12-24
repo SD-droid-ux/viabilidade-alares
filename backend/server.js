@@ -19,23 +19,40 @@ console.log('🔧 [Config] FRONTEND_URL:', process.env.FRONTEND_URL || 'Não con
 console.log('🔧 [Config] DATA_DIR:', process.env.DATA_DIR || './data');
 
 // Middleware CORS - Configuração robusta para produção
-// Permitir todas as origens por padrão (pode ser restringido depois se necessário)
-const corsOptions = {
-  origin: function (origin, callback) {
-    // Log para debug
-    console.log('🌐 [CORS] Requisição recebida de origem:', origin || 'Sem origem (Postman/curl)');
-    
-    // Permitir todas as origens
-    // Se quiser restringir depois, adicione a lógica aqui
-    callback(null, true);
-  },
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
-  exposedHeaders: ['Content-Length', 'Content-Type']
-};
+// Permitir todas as origens por padrão
+app.use((req, res, next) => {
+  // Log para debug
+  const origin = req.headers.origin;
+  console.log('🌐 [CORS] Requisição recebida de origem:', origin || 'Sem origem (Postman/curl)');
+  console.log('🌐 [CORS] Método:', req.method);
+  console.log('🌐 [CORS] Path:', req.path);
+  
+  // Permitir todas as origens
+  if (origin) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+  } else {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+  }
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
+  res.setHeader('Access-Control-Max-Age', '86400'); // 24 horas
+  
+  // Responder a requisições OPTIONS (preflight) imediatamente
+  if (req.method === 'OPTIONS') {
+    console.log('✅ [CORS] Preflight OPTIONS respondido');
+    return res.status(200).end();
+  }
+  
+  next();
+});
 
-app.use(cors(corsOptions));
+// Usar também o middleware cors como backup
+app.use(cors({
+  origin: true, // Permitir todas as origens
+  credentials: true
+}));
+
 app.use(express.json({ limit: '100mb' }));
 app.use(express.urlencoded({ extended: true, limit: '100mb' }));
 
@@ -1603,8 +1620,32 @@ app.get('/api/vi-ala.xlsx', (req, res) => {
   }
 });
 
-app.listen(PORT, () => {
-  console.log(`🚀 Servidor rodando em http://localhost:${PORT}`);
+// Rota catch-all para rotas não encontradas (sempre retorna JSON)
+app.use((req, res) => {
+  console.log(`⚠️ [404] Rota não encontrada: ${req.method} ${req.path}`);
+  res.status(404).json({ 
+    success: false, 
+    error: 'Rota não encontrada',
+    path: req.path,
+    method: req.method
+  });
+});
+
+// Tratamento de erros global
+app.use((err, req, res, next) => {
+  console.error('❌ [Error] Erro não tratado:', err);
+  console.error('❌ [Error] Stack:', err.stack);
+  if (!res.headersSent) {
+    res.status(500).json({ 
+      success: false, 
+      error: err.message || 'Erro interno do servidor' 
+    });
+  }
+});
+
+// Iniciar servidor - escutar em 0.0.0.0 para aceitar conexões externas (Railway)
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`🚀 Servidor rodando em http://0.0.0.0:${PORT}`);
   console.log(`📁 Pasta de dados: ${DATA_DIR}`);
   console.log(`📁 Arquivo projetistas: ${PROJETISTAS_FILE}`);
   console.log(`📁 Arquivo base CTOs: ${BASE_CTOS_FILE}`);
