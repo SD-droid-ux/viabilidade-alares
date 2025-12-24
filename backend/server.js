@@ -19,32 +19,39 @@ console.log('🔧 [Config] FRONTEND_URL:', process.env.FRONTEND_URL || 'Não con
 console.log('🔧 [Config] DATA_DIR:', process.env.DATA_DIR || './data');
 
 // Middleware CORS - Configuração robusta para produção
-// Permitir todas as origens por padrão
+// Permitir todas as origens por padrão - DEVE SER O PRIMEIRO MIDDLEWARE
 app.use((req, res, next) => {
-  // Log para debug
-  const origin = req.headers.origin;
-  console.log('🌐 [CORS] Requisição recebida de origem:', origin || 'Sem origem (Postman/curl)');
-  console.log('🌐 [CORS] Método:', req.method);
-  console.log('🌐 [CORS] Path:', req.path);
-  
-  // Permitir todas as origens
-  if (origin) {
-    res.setHeader('Access-Control-Allow-Origin', origin);
-  } else {
-    res.setHeader('Access-Control-Allow-Origin', '*');
+  try {
+    // Log para debug
+    const origin = req.headers.origin;
+    console.log('🌐 [CORS] Requisição recebida de origem:', origin || 'Sem origem (Postman/curl)');
+    console.log('🌐 [CORS] Método:', req.method);
+    console.log('🌐 [CORS] Path:', req.path);
+    
+    // Permitir todas as origens - SEMPRE definir headers CORS
+    if (origin) {
+      res.setHeader('Access-Control-Allow-Origin', origin);
+    } else {
+      res.setHeader('Access-Control-Allow-Origin', '*');
+    }
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Content-Length');
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+    res.setHeader('Access-Control-Max-Age', '86400'); // 24 horas
+    res.setHeader('Access-Control-Expose-Headers', 'Content-Length, Content-Type');
+    
+    // Responder a requisições OPTIONS (preflight) imediatamente
+    if (req.method === 'OPTIONS') {
+      console.log('✅ [CORS] Preflight OPTIONS respondido para:', req.path);
+      return res.status(200).end();
+    }
+    
+    next();
+  } catch (err) {
+    console.error('❌ [CORS] Erro no middleware CORS:', err);
+    // Mesmo com erro, tentar continuar
+    next();
   }
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
-  res.setHeader('Access-Control-Allow-Credentials', 'true');
-  res.setHeader('Access-Control-Max-Age', '86400'); // 24 horas
-  
-  // Responder a requisições OPTIONS (preflight) imediatamente
-  if (req.method === 'OPTIONS') {
-    console.log('✅ [CORS] Preflight OPTIONS respondido');
-    return res.status(200).end();
-  }
-  
-  next();
 });
 
 // Usar também o middleware cors como backup
@@ -1479,6 +1486,15 @@ app.get('/api/users/online', (req, res) => {
 // Rota para atualizar atividade do usuário (heartbeat)
 app.post('/api/users/heartbeat', (req, res) => {
   try {
+    // Garantir headers CORS
+    const origin = req.headers.origin;
+    if (origin) {
+      res.setHeader('Access-Control-Allow-Origin', origin);
+    } else {
+      res.setHeader('Access-Control-Allow-Origin', '*');
+    }
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+    
     const { usuario } = req.body;
     
     if (usuario && usuario.trim()) {
@@ -1490,7 +1506,18 @@ app.post('/api/users/heartbeat', (req, res) => {
     
     res.json({ success: true });
   } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
+    // Garantir headers CORS mesmo em erro
+    const origin = req.headers.origin;
+    if (origin) {
+      res.setHeader('Access-Control-Allow-Origin', origin);
+    } else {
+      res.setHeader('Access-Control-Allow-Origin', '*');
+    }
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+    
+    if (!res.headersSent) {
+      res.status(500).json({ success: false, error: err.message });
+    }
   }
 });
 
@@ -1515,12 +1542,33 @@ app.get('/api/vi-ala/test', (req, res) => {
 app.get('/api/test', (req, res) => {
   console.log('📥 [API] Teste de conectividade recebido');
   console.log('📥 [API] Origin:', req.headers.origin);
+  
+  // Garantir headers CORS
+  const origin = req.headers.origin;
+  if (origin) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+  } else {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+  }
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
+  
   res.json({ 
     success: true, 
     message: 'Backend está funcionando!', 
     timestamp: new Date().toISOString(),
     origin: req.headers.origin || 'N/A'
   });
+});
+
+// Rota de health check
+app.get('/health', (req, res) => {
+  const origin = req.headers.origin;
+  if (origin) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+  } else {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+  }
+  res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
 // Rota para obter próximo VI ALA
