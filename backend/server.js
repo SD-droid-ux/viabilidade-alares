@@ -1811,11 +1811,29 @@ process.on('unhandledRejection', (reason, promise) => {
 });
 
 // Iniciar servidor - escutar em 0.0.0.0 para aceitar conexões externas (Railway)
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`🚀 Servidor rodando em http://0.0.0.0:${PORT}`);
-  console.log(`📁 Pasta de dados: ${DATA_DIR}`);
-  console.log(`📁 Arquivo projetistas: ${PROJETISTAS_FILE}`);
-  console.log(`📁 Arquivo base CTOs: ${BASE_CTOS_FILE}`);
-  console.log(`📁 Arquivo tabulações: ${TABULACOES_FILE}`);
-});
+try {
+  const server = app.listen(PORT, '0.0.0.0', () => {
+    console.log(`🚀 Servidor rodando em http://0.0.0.0:${PORT}`);
+    console.log(`📁 Pasta de dados: ${DATA_DIR}`);
+    console.log(`📁 Arquivo projetistas: ${PROJETISTAS_FILE}`);
+    console.log(`📁 Arquivo base CTOs: ${BASE_CTOS_FILE}`);
+    console.log(`📁 Arquivo tabulações: ${TABULACOES_FILE}`);
+    console.log(`✅ Servidor iniciado com sucesso!`);
+  });
+  
+  // Configurar timeout do servidor (5 minutos)
+  server.timeout = 5 * 60 * 1000;
+  server.keepAliveTimeout = 65000;
+  server.headersTimeout = 66000;
+  
+  // Tratamento de erros do servidor
+  server.on('error', (err) => {
+    console.error('❌ [Server] Erro no servidor:', err);
+  });
+  
+} catch (err) {
+  console.error('❌ [Fatal] Erro ao iniciar servidor:', err);
+  console.error('❌ [Fatal] Stack:', err.stack);
+  process.exit(1);
+}
 
