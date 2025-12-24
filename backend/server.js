@@ -1150,7 +1150,7 @@ app.post('/api/upload-base', (req, res, next) => {
   console.log('📥 [Upload] Origin:', req.headers.origin);
   console.log('📥 [Upload] Content-Type:', req.headers['content-type']);
   
-  // Garantir headers CORS antes de processar
+  // Garantir headers CORS ANTES de qualquer processamento
   const origin = req.headers.origin;
   if (origin) {
     res.setHeader('Access-Control-Allow-Origin', origin);
@@ -1158,6 +1158,12 @@ app.post('/api/upload-base', (req, res, next) => {
     res.setHeader('Access-Control-Allow-Origin', '*');
   }
   res.setHeader('Access-Control-Allow-Credentials', 'true');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+  
+  // Configurar timeout maior para uploads grandes (5 minutos)
+  req.setTimeout(5 * 60 * 1000);
+  res.setTimeout(5 * 60 * 1000);
   
   upload.single('file')(req, res, (err) => {
     if (err) {
@@ -1191,8 +1197,19 @@ app.post('/api/upload-base', (req, res, next) => {
     next();
   });
 }, async (req, res) => {
+  // Obter origin novamente para garantir que está disponível
+  const origin = req.headers.origin;
+  
   try {
     if (!req.file) {
+      // Garantir headers CORS
+      if (origin) {
+        res.setHeader('Access-Control-Allow-Origin', origin);
+      } else {
+        res.setHeader('Access-Control-Allow-Origin', '*');
+      }
+      res.setHeader('Access-Control-Allow-Credentials', 'true');
+      
       return res.status(400).json({ 
         success: false, 
         error: 'Nenhum arquivo foi enviado' 
@@ -1207,6 +1224,14 @@ app.post('/api/upload-base', (req, res, next) => {
     ];
     
     if (!allowedMimes.includes(req.file.mimetype) && !req.file.originalname.match(/\.(xlsx|xls)$/i)) {
+      // Garantir headers CORS
+      if (origin) {
+        res.setHeader('Access-Control-Allow-Origin', origin);
+      } else {
+        res.setHeader('Access-Control-Allow-Origin', '*');
+      }
+      res.setHeader('Access-Control-Allow-Credentials', 'true');
+      
       return res.status(400).json({
         success: false,
         error: 'Formato de arquivo inválido. Apenas arquivos Excel (.xlsx ou .xls) são aceitos.'
@@ -1216,27 +1241,38 @@ app.post('/api/upload-base', (req, res, next) => {
     console.log(`📤 Arquivo recebido: ${req.file.originalname} (${req.file.size} bytes)`);
     console.log(`📋 Tipo MIME: ${req.file.mimetype}`);
 
-    // Validar estrutura do arquivo de forma não bloqueante
-    // Usar process.nextTick para permitir que outras operações sejam executadas
-    const validation = await new Promise((resolve) => {
-      process.nextTick(() => {
-        try {
-          console.log('🔍 Iniciando validação do arquivo...');
-          const result = validateExcelStructure(req.file.buffer);
-          console.log(`📊 Resultado da validação:`, result);
-          resolve(result);
-        } catch (err) {
-          console.error('❌ Erro durante validação:', err);
-          resolve({
-            valid: false,
-            error: `Erro ao validar arquivo: ${err.message}`
-          });
-        }
+    // Validar estrutura do arquivo de forma rápida e não bloqueante
+    let validation;
+    try {
+      console.log('🔍 Iniciando validação rápida do arquivo...');
+      validation = validateExcelStructure(req.file.buffer);
+      console.log(`📊 Resultado da validação:`, validation);
+    } catch (err) {
+      console.error('❌ Erro durante validação:', err);
+      // Garantir headers CORS na resposta de erro
+      if (origin) {
+        res.setHeader('Access-Control-Allow-Origin', origin);
+      } else {
+        res.setHeader('Access-Control-Allow-Origin', '*');
+      }
+      res.setHeader('Access-Control-Allow-Credentials', 'true');
+      
+      return res.status(400).json({
+        success: false,
+        error: `Erro ao validar arquivo: ${err.message}`
       });
-    });
+    }
     
     if (!validation.valid) {
       console.error(`❌ Validação falhou: ${validation.error}`);
+      // Garantir headers CORS na resposta de erro
+      if (origin) {
+        res.setHeader('Access-Control-Allow-Origin', origin);
+      } else {
+        res.setHeader('Access-Control-Allow-Origin', '*');
+      }
+      res.setHeader('Access-Control-Allow-Credentials', 'true');
+      
       return res.status(400).json({
         success: false,
         error: validation.error
@@ -1245,68 +1281,7 @@ app.post('/api/upload-base', (req, res, next) => {
 
     console.log(`✅ Validação bem-sucedida: ${validation.validRows} linhas válidas de ${validation.totalRows} total`);
 
-    // Obter data atual para nomear arquivos
-    const now = new Date();
-    const dateStr = formatDateForFilename(now);
-    
-    // Processar operações de arquivo em paralelo e de forma assíncrona
-    // Encontrar arquivos existentes (assíncrono)
-    const [currentBasePath, backupBasePath] = await Promise.all([
-      findCurrentBaseFile(),
-      findBackupBaseFile()
-    ]);
-    
-    // Preparar operações de arquivo para executar em paralelo quando possível
-    const fileOperations = [];
-    
-    // Se existe base_atual e backup, apagar o backup antigo (assíncrono)
-    if (currentBasePath && backupBasePath) {
-      fileOperations.push(
-        fsPromises.unlink(backupBasePath).then(() => {
-          console.log(`🗑️ Backup antigo removido: ${path.basename(backupBasePath)}`);
-        }).catch(err => {
-          console.error('Erro ao remover backup antigo:', err);
-        })
-      );
-    }
-    
-    // Se existe base_atual, renomear para backup (assíncrono)
-    if (currentBasePath) {
-      const backupFileName = `backup_${dateStr}.xlsx`;
-      const newBackupPath = path.join(DATA_DIR, backupFileName);
-      fileOperations.push(
-        fsPromises.rename(currentBasePath, newBackupPath).then(() => {
-          console.log(`💾 Base atual movida para backup: ${backupFileName}`);
-        }).catch(err => {
-          console.error('Erro ao criar backup da base atual:', err);
-          // Tentar copiar ao invés de renomear
-          return fsPromises.copyFile(currentBasePath, newBackupPath).then(() => {
-            console.log(`💾 Backup criado por cópia: ${backupFileName}`);
-          }).catch(copyErr => {
-            console.error('Erro ao copiar para backup:', copyErr);
-          });
-        })
-      );
-    }
-    
-    // Salvar novo arquivo como base_atual_DD-MM-YYYY.xlsx (assíncrono)
-    const newBaseFileName = `base_atual_${dateStr}.xlsx`;
-    const newBasePath = path.join(DATA_DIR, newBaseFileName);
-    
-    // Executar todas as operações de arquivo em paralelo
-    await Promise.all([
-      ...fileOperations,
-      fsPromises.writeFile(newBasePath, req.file.buffer)
-    ]);
-    
-    console.log(`✅ Base de dados salva como: ${newBaseFileName}`);
-
-    // Obter data de modificação do arquivo (assíncrono)
-    const stats = await fsPromises.stat(newBasePath);
-    const lastModified = stats.mtime;
-
-    // Garantir headers CORS na resposta de sucesso
-    const origin = req.headers.origin;
+    // Garantir headers CORS na resposta de sucesso ANTES de processar
     if (origin) {
       res.setHeader('Access-Control-Allow-Origin', origin);
     } else {
@@ -1314,25 +1289,89 @@ app.post('/api/upload-base', (req, res, next) => {
     }
     res.setHeader('Access-Control-Allow-Credentials', 'true');
     
-    // Retornar resposta imediatamente
+    // Responder IMEDIATAMENTE para evitar timeout
+    // Processar arquivo em background
     res.json({
       success: true,
-      message: `Base de dados atualizada com sucesso!\n${validation.validRows} linhas válidas de ${validation.totalRows} total`,
+      message: `Upload recebido! Processando arquivo...\n${validation.validRows} linhas válidas de ${validation.totalRows} total`,
       stats: {
         totalRows: validation.totalRows,
         validRows: validation.validRows,
         invalidRows: validation.invalidRows
       },
-      lastModified: lastModified.toISOString()
+      processing: true
     });
+    
+    // Processar arquivo em background (não bloqueia a resposta)
+    (async () => {
+      try {
+        // Obter data atual para nomear arquivos
+        const now = new Date();
+        const dateStr = formatDateForFilename(now);
+        
+        // Processar operações de arquivo em paralelo e de forma assíncrona
+        // Encontrar arquivos existentes (assíncrono)
+        const [currentBasePath, backupBasePath] = await Promise.all([
+          findCurrentBaseFile(),
+          findBackupBaseFile()
+        ]);
+        
+        // Preparar operações de arquivo para executar em paralelo quando possível
+        const fileOperations = [];
+        
+        // Se existe base_atual e backup, apagar o backup antigo (assíncrono)
+        if (currentBasePath && backupBasePath) {
+          fileOperations.push(
+            fsPromises.unlink(backupBasePath).then(() => {
+              console.log(`🗑️ Backup antigo removido: ${path.basename(backupBasePath)}`);
+            }).catch(err => {
+              console.error('Erro ao remover backup antigo:', err);
+            })
+          );
+        }
+        
+        // Se existe base_atual, renomear para backup (assíncrono)
+        if (currentBasePath) {
+          const backupFileName = `backup_${dateStr}.xlsx`;
+          const newBackupPath = path.join(DATA_DIR, backupFileName);
+          fileOperations.push(
+            fsPromises.rename(currentBasePath, newBackupPath).then(() => {
+              console.log(`💾 Base atual movida para backup: ${backupFileName}`);
+            }).catch(err => {
+              console.error('Erro ao criar backup da base atual:', err);
+              // Tentar copiar ao invés de renomear
+              return fsPromises.copyFile(currentBasePath, newBackupPath).then(() => {
+                console.log(`💾 Backup criado por cópia: ${backupFileName}`);
+              }).catch(copyErr => {
+                console.error('Erro ao copiar para backup:', copyErr);
+              });
+            })
+          );
+        }
+        
+        // Salvar novo arquivo como base_atual_DD-MM-YYYY.xlsx (assíncrono)
+        const newBaseFileName = `base_atual_${dateStr}.xlsx`;
+        const newBasePath = path.join(DATA_DIR, newBaseFileName);
+        
+        // Executar todas as operações de arquivo em paralelo
+        await Promise.all([
+          ...fileOperations,
+          fsPromises.writeFile(newBasePath, req.file.buffer)
+        ]);
+        
+        console.log(`✅ Base de dados salva como: ${newBaseFileName}`);
+      } catch (err) {
+        console.error('❌ Erro ao processar arquivo em background:', err);
+      }
+    })();
   } catch (err) {
     console.error('❌ Erro ao fazer upload da base de dados:', err);
     console.error('❌ Stack trace:', err.stack);
     
     // Garantir headers CORS mesmo em caso de erro
-    const origin = req.headers.origin;
-    if (origin) {
-      res.setHeader('Access-Control-Allow-Origin', origin);
+    const errorOrigin = req.headers.origin;
+    if (errorOrigin) {
+      res.setHeader('Access-Control-Allow-Origin', errorOrigin);
     } else {
       res.setHeader('Access-Control-Allow-Origin', '*');
     }
@@ -1443,6 +1482,15 @@ app.post('/api/auth/logout', (req, res) => {
 // Rota para obter lista de usuários online com informações de timestamp
 app.get('/api/users/online', (req, res) => {
   try {
+    // Garantir headers CORS
+    const origin = req.headers.origin;
+    if (origin) {
+      res.setHeader('Access-Control-Allow-Origin', origin);
+    } else {
+      res.setHeader('Access-Control-Allow-Origin', '*');
+    }
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+    
     const now = Date.now();
     const onlineUsers = [];
     const usersInfo = {};
@@ -1479,7 +1527,18 @@ app.get('/api/users/online', (req, res) => {
     
     res.json({ success: true, onlineUsers, usersInfo });
   } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
+    // Garantir headers CORS mesmo em erro
+    const origin = req.headers.origin;
+    if (origin) {
+      res.setHeader('Access-Control-Allow-Origin', origin);
+    } else {
+      res.setHeader('Access-Control-Allow-Origin', '*');
+    }
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+    
+    if (!res.headersSent) {
+      res.status(500).json({ success: false, error: err.message });
+    }
   }
 });
 
