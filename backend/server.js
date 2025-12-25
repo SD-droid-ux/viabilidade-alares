@@ -416,8 +416,8 @@ async function readCTOsFromSupabase() {
     }
     
     if (!data || data.length === 0) {
-      console.log('⚠️ [Supabase] Nenhuma CTO encontrada no Supabase');
-      return null; // Fallback para Excel
+      console.log('⚠️ [Supabase] Nenhuma CTO encontrada no Supabase (retornando array vazio)');
+      return []; // Retornar array vazio (não null) para indicar que Supabase está funcionando, mas vazio
     }
     
     // Converter para formato Excel (mesma estrutura do arquivo)
@@ -466,13 +466,37 @@ app.get('/api/base.xlsx', async (req, res) => {
     
     // Tentar ler do Supabase primeiro
     const supabaseData = await readCTOsFromSupabase();
-    if (supabaseData !== null && supabaseData.length > 0) {
+    
+    // Se Supabase retornou dados (mesmo que vazio), usar Supabase
+    if (supabaseData !== null) {
       try {
+        // Se tiver dados, usar; se estiver vazio, criar estrutura vazia
+        const dataToExport = supabaseData.length > 0 
+          ? supabaseData 
+          : [{
+              cid_rede: '',
+              estado: '',
+              pop: '',
+              olt: '',
+              slot: '',
+              pon: '',
+              id_cto: '',
+              cto: '',
+              latitude: '',
+              longitude: '',
+              status_cto: '',
+              data_cadastro: '',
+              portas: '',
+              ocupado: '',
+              livre: '',
+              pct_ocup: ''
+            }];
+        
         console.log('📤 [Supabase] Convertendo CTOs do Supabase para Excel...');
         console.log(`📊 [Supabase] Total de CTOs: ${supabaseData.length}`);
         
         // Criar workbook Excel em memória
-        const worksheet = XLSX.utils.json_to_sheet(supabaseData);
+        const worksheet = XLSX.utils.json_to_sheet(dataToExport);
         const workbook = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(workbook, worksheet, 'CTOs');
         
@@ -495,7 +519,7 @@ app.get('/api/base.xlsx', async (req, res) => {
         // Continuar com fallback Excel
       }
     } else {
-      console.log('⚠️ [Base] Supabase não retornou dados ou está vazio, tentando fallback Excel...');
+      console.log('⚠️ [Base] Supabase não disponível ou erro, tentando fallback Excel...');
     }
     
     // Fallback: servir arquivo Excel do disco
@@ -3252,4 +3276,3 @@ try {
   console.error('❌ [Fatal] Stack:', err.stack);
   process.exit(1);
 }
-
