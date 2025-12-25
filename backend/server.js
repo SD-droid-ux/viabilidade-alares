@@ -1144,11 +1144,32 @@ function validateExcelStructure(fileBuffer) {
   }
 }
 
+// Rota GET para /api/upload-base (retorna erro informativo)
+app.get('/api/upload-base', (req, res) => {
+  console.log('⚠️ [Upload] Requisição GET recebida em /api/upload-base (deveria ser POST)');
+  const origin = req.headers.origin;
+  if (origin) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+  } else {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+  }
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
+  res.status(405).json({
+    success: false,
+    error: 'Método não permitido. Use POST para fazer upload de arquivos.',
+    method: req.method,
+    allowedMethods: ['POST']
+  });
+});
+
 // Rota para upload e atualização da base de dados
 app.post('/api/upload-base', (req, res, next) => {
-  console.log('📥 [Upload] Requisição recebida para upload de base de dados');
+  console.log('📥 [Upload] Requisição POST recebida para upload de base de dados');
+  console.log('📥 [Upload] Método:', req.method);
   console.log('📥 [Upload] Origin:', req.headers.origin);
   console.log('📥 [Upload] Content-Type:', req.headers['content-type']);
+  console.log('📥 [Upload] Path:', req.path);
+  console.log('📥 [Upload] URL completa:', req.url);
   
   // Garantir headers CORS ANTES de qualquer processamento
   const origin = req.headers.origin;
