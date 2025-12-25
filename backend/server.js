@@ -1624,6 +1624,39 @@ app.get('/api/test', (req, res) => {
   });
 });
 
+// Rota raiz - retorna informações da API
+app.get('/', (req, res) => {
+  const origin = req.headers.origin;
+  if (origin) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+  } else {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+  }
+  res.json({
+    success: true,
+    message: 'API Viabilidade Alares - Backend',
+    version: '1.0.0',
+    status: 'online',
+    timestamp: new Date().toISOString(),
+    endpoints: {
+      health: '/health',
+      test: '/api/test',
+      upload: '/api/upload-base',
+      login: '/api/auth/login',
+      logout: '/api/auth/logout',
+      users: '/api/users/online',
+      projetistas: '/api/projetistas',
+      tabulacoes: '/api/tabulacoes',
+      viAla: {
+        next: '/api/vi-ala/next',
+        save: '/api/vi-ala/save',
+        list: '/api/vi-ala/list',
+        download: '/api/vi-ala.xlsx'
+      }
+    }
+  });
+});
+
 // Rota de health check
 app.get('/health', (req, res) => {
   const origin = req.headers.origin;
