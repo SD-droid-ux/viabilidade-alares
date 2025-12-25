@@ -2148,6 +2148,7 @@ app.post('/api/upload-base', (req, res, next) => {
         let importedRows = 0;
         if (supabase && isSupabaseAvailable()) {
           try {
+            console.log('📤 [Background] ===== INICIANDO IMPORTAÇÃO SUPABASE =====');
             console.log('📤 [Background] Lendo dados do Excel para importar no Supabase...');
             
             // Ler dados do arquivo Excel
@@ -2156,113 +2157,178 @@ app.post('/api/upload-base', (req, res, next) => {
             const worksheet = workbook.Sheets[sheetName];
             const excelData = XLSX.utils.sheet_to_json(worksheet);
             
+            console.log(`📊 [Background] Total de linhas no Excel: ${excelData.length}`);
+            
             if (excelData && excelData.length > 0) {
-              console.log(`📊 [Background] ${excelData.length} linhas lidas do Excel`);
+              // Mostrar primeiras colunas encontradas para debug
+              if (excelData.length > 0) {
+                const firstRow = excelData[0];
+                const columns = Object.keys(firstRow);
+                console.log(`📋 [Background] Colunas encontradas no Excel (${columns.length}):`, columns.slice(0, 10).join(', '), columns.length > 10 ? '...' : '');
+              }
+              
+              // Função auxiliar para converter data
+              const parseDate = (value) => {
+                if (!value) return null;
+                if (value instanceof Date) return value.toISOString().split('T')[0];
+                if (typeof value === 'string') {
+                  // Tentar parsear diferentes formatos
+                  const date = new Date(value);
+                  if (!isNaN(date.getTime())) {
+                    return date.toISOString().split('T')[0];
+                  }
+                }
+                if (typeof value === 'number') {
+                  // Excel serial date
+                  const date = XLSX.SSF.parse_date_code(value);
+                  if (date) {
+                    return `${date.y}-${String(date.m).padStart(2, '0')}-${String(date.d).padStart(2, '0')}`;
+                  }
+                }
+                return null;
+              };
               
               // Converter para formato Supabase
+              let validCount = 0;
+              let invalidCount = 0;
               const ctosToImport = excelData
-                .map(row => {
-                  // Normalizar nomes de colunas (case insensitive)
-                  const normalizeKey = (key) => {
-                    const lower = String(key || '').toLowerCase().trim();
-                    const mapping = {
-                      'cid_rede': 'cid_rede',
-                      'cid rede': 'cid_rede',
-                      'estado': 'estado',
-                      'pop': 'pop',
-                      'olt': 'olt',
-                      'slot': 'slot',
-                      'pon': 'pon',
-                      'id_cto': 'id_cto',
-                      'id cto': 'id_cto',
-                      'cto': 'cto',
-                      'latitude': 'latitude',
-                      'lat': 'latitude',
-                      'longitude': 'longitude',
-                      'long': 'longitude',
-                      'lng': 'longitude',
-                      'status_cto': 'status_cto',
-                      'status cto': 'status_cto',
-                      'data_cadastro': 'data_cadastro',
-                      'data cadastro': 'data_cadastro',
-                      'portas': 'portas',
-                      'ocupado': 'ocupado',
-                      'livre': 'livre',
-                      'pct_ocup': 'pct_ocup',
-                      'pct ocup': 'pct_ocup'
+                .map((row, index) => {
+                  try {
+                    // Normalizar nomes de colunas (case insensitive)
+                    const normalizeKey = (key) => {
+                      const lower = String(key || '').toLowerCase().trim();
+                      const mapping = {
+                        'cid_rede': 'cid_rede',
+                        'cid rede': 'cid_rede',
+                        'estado': 'estado',
+                        'pop': 'pop',
+                        'olt': 'olt',
+                        'slot': 'slot',
+                        'pon': 'pon',
+                        'id_cto': 'id_cto',
+                        'id cto': 'id_cto',
+                        'cto': 'cto',
+                        'latitude': 'latitude',
+                        'lat': 'latitude',
+                        'longitude': 'longitude',
+                        'long': 'longitude',
+                        'lng': 'longitude',
+                        'status_cto': 'status_cto',
+                        'status cto': 'status_cto',
+                        'data_cadastro': 'data_cadastro',
+                        'data cadastro': 'data_cadastro',
+                        'portas': 'portas',
+                        'ocupado': 'ocupado',
+                        'livre': 'livre',
+                        'pct_ocup': 'pct_ocup',
+                        'pct ocup': 'pct_ocup'
+                      };
+                      return mapping[lower] || lower;
                     };
-                    return mapping[lower] || lower;
-                  };
-                  
-                  const normalizedRow = {};
-                  for (const key in row) {
-                    const normalizedKey = normalizeKey(key);
-                    normalizedRow[normalizedKey] = row[key];
+                    
+                    const normalizedRow = {};
+                    for (const key in row) {
+                      const normalizedKey = normalizeKey(key);
+                      normalizedRow[normalizedKey] = row[key];
+                    }
+                    
+                    // Converter valores
+                    let lat = normalizedRow.latitude;
+                    let lng = normalizedRow.longitude;
+                    
+                    // Tentar converter para número se for string
+                    if (typeof lat === 'string') {
+                      lat = lat.replace(',', '.');
+                      lat = parseFloat(lat);
+                    }
+                    if (typeof lng === 'string') {
+                      lng = lng.replace(',', '.');
+                      lng = parseFloat(lng);
+                    }
+                    
+                    const cto = {
+                      cid_rede: normalizedRow.cid_rede || null,
+                      estado: normalizedRow.estado || null,
+                      pop: normalizedRow.pop || null,
+                      olt: normalizedRow.olt || null,
+                      slot: normalizedRow.slot || null,
+                      pon: normalizedRow.pon || null,
+                      id_cto: normalizedRow.id_cto || null,
+                      cto: normalizedRow.cto || null,
+                      latitude: (lat && !isNaN(lat)) ? lat : null,
+                      longitude: (lng && !isNaN(lng)) ? lng : null,
+                      status_cto: normalizedRow.status_cto || null,
+                      data_cadastro: parseDate(normalizedRow.data_cadastro),
+                      portas: normalizedRow.portas ? parseInt(normalizedRow.portas) : null,
+                      ocupado: normalizedRow.ocupado ? parseInt(normalizedRow.ocupado) : null,
+                      livre: normalizedRow.livre ? parseInt(normalizedRow.livre) : null,
+                      pct_ocup: normalizedRow.pct_ocup ? parseFloat(normalizedRow.pct_ocup) : null
+                    };
+                    
+                    // Filtrar apenas linhas com coordenadas válidas (essenciais)
+                    if (cto.latitude && cto.longitude && 
+                        !isNaN(cto.latitude) && !isNaN(cto.longitude) &&
+                        cto.latitude >= -90 && cto.latitude <= 90 &&
+                        cto.longitude >= -180 && cto.longitude <= 180) {
+                      validCount++;
+                      return cto;
+                    }
+                    invalidCount++;
+                    return null;
+                  } catch (rowErr) {
+                    console.warn(`⚠️ [Background] Erro ao processar linha ${index + 1}:`, rowErr.message);
+                    invalidCount++;
+                    return null;
                   }
-                  
-                  // Converter valores
-                  const cto = {
-                    cid_rede: normalizedRow.cid_rede || null,
-                    estado: normalizedRow.estado || null,
-                    pop: normalizedRow.pop || null,
-                    olt: normalizedRow.olt || null,
-                    slot: normalizedRow.slot || null,
-                    pon: normalizedRow.pon || null,
-                    id_cto: normalizedRow.id_cto || null,
-                    cto: normalizedRow.cto || null,
-                    latitude: normalizedRow.latitude ? parseFloat(normalizedRow.latitude) : null,
-                    longitude: normalizedRow.longitude ? parseFloat(normalizedRow.longitude) : null,
-                    status_cto: normalizedRow.status_cto || null,
-                    data_cadastro: normalizedRow.data_cadastro || null,
-                    portas: normalizedRow.portas ? parseInt(normalizedRow.portas) : null,
-                    ocupado: normalizedRow.ocupado ? parseInt(normalizedRow.ocupado) : null,
-                    livre: normalizedRow.livre ? parseInt(normalizedRow.livre) : null,
-                    pct_ocup: normalizedRow.pct_ocup ? parseFloat(normalizedRow.pct_ocup) : null
-                  };
-                  
-                  // Filtrar apenas linhas com coordenadas válidas (essenciais)
-                  if (cto.latitude && cto.longitude && 
-                      !isNaN(cto.latitude) && !isNaN(cto.longitude) &&
-                      cto.latitude >= -90 && cto.latitude <= 90 &&
-                      cto.longitude >= -180 && cto.longitude <= 180) {
-                    return cto;
-                  }
-                  return null;
                 })
                 .filter(cto => cto !== null); // Remover inválidos
               
-              console.log(`📊 [Background] ${ctosToImport.length} CTOs válidas para importar (com coordenadas)`);
+              console.log(`📊 [Background] CTOs processadas: ${validCount} válidas, ${invalidCount} inválidas`);
+              console.log(`📊 [Background] Total de CTOs para importar: ${ctosToImport.length}`);
               
               if (ctosToImport.length > 0) {
                 // Deletar todas as CTOs existentes antes de importar (substituição completa)
                 console.log('🗑️ [Background] Limpando CTOs antigas do Supabase...');
-                const { error: deleteError } = await supabase
+                const { error: deleteError, count: deleteCount } = await supabase
                   .from('ctos')
                   .delete()
                   .neq('id', 0); // Deletar todos
                 
                 if (deleteError) {
                   console.error('❌ [Background] Erro ao limpar CTOs antigas:', deleteError);
+                  console.error('❌ [Background] Detalhes do erro:', JSON.stringify(deleteError, null, 2));
                   throw deleteError;
                 }
+                
+                console.log(`✅ [Background] CTOs antigas removidas (${deleteCount || 'N/A'} registros)`);
                 
                 // Importar em lotes de 1000 para melhor performance
                 const BATCH_SIZE = 1000;
                 let imported = 0;
+                const totalBatches = Math.ceil(ctosToImport.length / BATCH_SIZE);
+                
+                console.log(`📦 [Background] Importando em ${totalBatches} lote(s) de até ${BATCH_SIZE} registros cada...`);
                 
                 for (let i = 0; i < ctosToImport.length; i += BATCH_SIZE) {
                   const batch = ctosToImport.slice(i, i + BATCH_SIZE);
-                  const { error: insertError } = await supabase
+                  const batchNumber = Math.floor(i / BATCH_SIZE) + 1;
+                  
+                  console.log(`📦 [Background] Importando lote ${batchNumber}/${totalBatches} (${batch.length} registros)...`);
+                  
+                  const { error: insertError, data: insertData } = await supabase
                     .from('ctos')
-                    .insert(batch);
+                    .insert(batch)
+                    .select('id');
                   
                   if (insertError) {
-                    console.error(`❌ [Background] Erro ao importar lote ${Math.floor(i / BATCH_SIZE) + 1}:`, insertError);
+                    console.error(`❌ [Background] Erro ao importar lote ${batchNumber}:`, insertError);
+                    console.error(`❌ [Background] Detalhes do erro:`, JSON.stringify(insertError, null, 2));
+                    console.error(`❌ [Background] Primeiro registro do lote:`, JSON.stringify(batch[0], null, 2));
                     throw insertError;
                   }
                   
                   imported += batch.length;
-                  console.log(`✅ [Background] Lote ${Math.floor(i / BATCH_SIZE) + 1} importado: ${imported}/${ctosToImport.length} CTOs`);
+                  console.log(`✅ [Background] Lote ${batchNumber}/${totalBatches} importado: ${imported}/${ctosToImport.length} CTOs`);
                 }
                 
                 importedRows = imported;
@@ -2274,10 +2340,10 @@ app.post('/api/upload-base', (req, res, next) => {
                     .from('upload_history')
                     .insert([{
                       file_name: fileName,
-                      file_size_bytes: fileSize,
+                      file_size: fileSize,
                       total_rows: excelData.length,
                       valid_rows: importedRows,
-                      uploaded_by: req.body?.usuario || 'Sistema'
+                      uploaded_by: req.body?.usuario || req.user?.nome || 'Sistema'
                     }]);
                   
                   if (historyError) {
@@ -2289,16 +2355,33 @@ app.post('/api/upload-base', (req, res, next) => {
                   console.warn('⚠️ [Background] Erro ao registrar histórico (não crítico):', historyErr.message);
                 }
                 
+                console.log(`✅ [Background] ===== IMPORTAÇÃO SUPABASE CONCLUÍDA =====`);
                 console.log(`✅ [Background] ${importedRows} CTOs importadas com sucesso no Supabase!`);
               } else {
                 console.warn('⚠️ [Background] Nenhuma CTO válida encontrada para importar');
+                console.warn(`⚠️ [Background] Total de linhas no Excel: ${excelData.length}`);
+                console.warn(`⚠️ [Background] Linhas válidas: ${validCount}, Linhas inválidas: ${invalidCount}`);
+                console.warn(`⚠️ [Background] Verifique se o Excel contém colunas 'latitude' e 'longitude' com valores válidos`);
               }
+            } else {
+              console.warn('⚠️ [Background] Excel está vazio ou não contém dados');
             }
           } catch (supabaseErr) {
-            console.error('❌ [Background] Erro ao importar para Supabase, continuando com Excel:', supabaseErr);
+            console.error('❌ [Background] ===== ERRO NA IMPORTAÇÃO SUPABASE =====');
+            console.error('❌ [Background] Erro ao importar para Supabase:', supabaseErr.message);
+            console.error('❌ [Background] Tipo do erro:', supabaseErr.name);
             console.error('❌ [Background] Stack:', supabaseErr.stack);
+            if (supabaseErr.details) {
+              console.error('❌ [Background] Detalhes:', supabaseErr.details);
+            }
+            if (supabaseErr.hint) {
+              console.error('❌ [Background] Dica:', supabaseErr.hint);
+            }
+            console.error('❌ [Background] Continuando com salvamento Excel (fallback)...');
             // Continuar com salvamento Excel (não quebrar o fluxo)
           }
+        } else {
+          console.log('⚠️ [Background] Supabase não disponível, pulando importação');
         }
         
         // Processar operações de arquivo de forma sequencial e segura
