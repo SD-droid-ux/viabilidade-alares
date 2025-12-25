@@ -6,6 +6,7 @@ import fsPromises from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import multer from 'multer';
+import supabase, { testSupabaseConnection, checkTables } from './supabase.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -1809,6 +1810,51 @@ app.get('/api/test', (req, res) => {
   });
 });
 
+// Rota para testar conexão com Supabase
+app.get('/api/test-supabase', async (req, res) => {
+  try {
+    // Garantir headers CORS
+    const origin = req.headers.origin;
+    if (origin) {
+      res.setHeader('Access-Control-Allow-Origin', origin);
+    } else {
+      res.setHeader('Access-Control-Allow-Origin', '*');
+    }
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+    
+    console.log('🔍 [API] Testando conexão com Supabase...');
+    
+    // Testar conexão
+    const connectionTest = await testSupabaseConnection();
+    
+    // Verificar tabelas
+    const tablesCheck = await checkTables();
+    
+    res.json({
+      success: connectionTest.success,
+      connection: connectionTest,
+      tables: tablesCheck,
+      timestamp: new Date().toISOString()
+    });
+  } catch (err) {
+    console.error('❌ [API] Erro ao testar Supabase:', err);
+    
+    const origin = req.headers.origin;
+    if (origin) {
+      res.setHeader('Access-Control-Allow-Origin', origin);
+    } else {
+      res.setHeader('Access-Control-Allow-Origin', '*');
+    }
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+    
+    res.status(500).json({
+      success: false,
+      error: err.message,
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
 // Rota raiz - retorna informações da API
 app.get('/', (req, res) => {
   const origin = req.headers.origin;
@@ -2035,13 +2081,42 @@ process.on('unhandledRejection', (reason, promise) => {
 
 // Iniciar servidor - escutar em 0.0.0.0 para aceitar conexões externas (Railway)
 try {
-  const server = app.listen(PORT, '0.0.0.0', () => {
+  const server = app.listen(PORT, '0.0.0.0', async () => {
     console.log(`🚀 Servidor rodando em http://0.0.0.0:${PORT}`);
     console.log(`📁 Pasta de dados: ${DATA_DIR}`);
     console.log(`📁 Arquivo projetistas: ${PROJETISTAS_FILE}`);
     console.log(`📁 Arquivo base CTOs: ${BASE_CTOS_FILE}`);
     console.log(`📁 Arquivo tabulações: ${TABULACOES_FILE}`);
     console.log(`✅ Servidor iniciado com sucesso!`);
+    
+    // Testar conexão com Supabase na inicialização (não bloqueia)
+    (async () => {
+      try {
+        console.log('🔍 [Startup] Testando conexão com Supabase...');
+        const connectionTest = await testSupabaseConnection();
+        if (connectionTest.success) {
+          console.log('✅ [Startup] Conexão com Supabase OK!');
+          
+          // Verificar tabelas
+          const tablesCheck = await checkTables();
+          const existingTables = Object.entries(tablesCheck)
+            .filter(([_, status]) => status.exists)
+            .map(([table, _]) => table);
+          
+          if (existingTables.length > 0) {
+            console.log(`✅ [Startup] Tabelas encontradas: ${existingTables.join(', ')}`);
+          } else {
+            console.log('⚠️ [Startup] Nenhuma tabela encontrada. Execute o schema SQL no Supabase.');
+          }
+        } else {
+          console.log('⚠️ [Startup] Conexão com Supabase falhou:', connectionTest.error);
+          console.log('⚠️ [Startup] Verifique as variáveis de ambiente SUPABASE_URL e SUPABASE_SERVICE_KEY');
+        }
+      } catch (err) {
+        console.error('❌ [Startup] Erro ao testar Supabase:', err.message);
+        console.log('⚠️ [Startup] O servidor continuará funcionando, mas Supabase pode não estar disponível');
+      }
+    })();
   });
   
   // Configurar timeout do servidor (2 minutos para uploads grandes)
