@@ -453,11 +453,23 @@ async function readCTOsFromSupabase() {
 // IMPORTANTE: Esta rota NUNCA serve backups - apenas arquivos base_atual_*.xlsx
 app.get('/api/base.xlsx', async (req, res) => {
   try {
+    // Garantir headers CORS
+    const origin = req.headers.origin;
+    if (origin) {
+      res.setHeader('Access-Control-Allow-Origin', origin);
+    } else {
+      res.setHeader('Access-Control-Allow-Origin', '*');
+    }
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+    
+    console.log('📥 [Base] Requisição para /api/base.xlsx recebida');
+    
     // Tentar ler do Supabase primeiro
     const supabaseData = await readCTOsFromSupabase();
-    if (supabaseData !== null) {
+    if (supabaseData !== null && supabaseData.length > 0) {
       try {
         console.log('📤 [Supabase] Convertendo CTOs do Supabase para Excel...');
+        console.log(`📊 [Supabase] Total de CTOs: ${supabaseData.length}`);
         
         // Criar workbook Excel em memória
         const worksheet = XLSX.utils.json_to_sheet(supabaseData);
@@ -467,7 +479,7 @@ app.get('/api/base.xlsx', async (req, res) => {
         // Gerar buffer Excel
         const excelBuffer = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
         
-        console.log(`✅ [Supabase] Excel gerado: ${supabaseData.length} CTOs`);
+        console.log(`✅ [Supabase] Excel gerado: ${supabaseData.length} CTOs (${excelBuffer.length} bytes)`);
         
         // Configurar headers para download
         res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
@@ -479,14 +491,54 @@ app.get('/api/base.xlsx', async (req, res) => {
         return;
       } catch (excelErr) {
         console.error('❌ [Supabase] Erro ao gerar Excel do Supabase, usando fallback:', excelErr);
+        console.error('❌ [Supabase] Stack:', excelErr.stack);
         // Continuar com fallback Excel
       }
+    } else {
+      console.log('⚠️ [Base] Supabase não retornou dados ou está vazio, tentando fallback Excel...');
     }
     
     // Fallback: servir arquivo Excel do disco
+    console.log('📂 [Excel] Tentando encontrar arquivo Excel no disco...');
     const currentBasePath = getCurrentBaseFilePathSync();
+    
     if (!currentBasePath || !fs.existsSync(currentBasePath)) {
-      return res.status(404).json({ error: 'Arquivo base de dados não encontrado. Carregue uma base de dados em Configurações.' });
+      console.warn('⚠️ [Base] Nenhum arquivo base_atual_*.xlsx encontrado');
+      console.warn('⚠️ [Base] Criando arquivo Excel vazio para evitar erro 404...');
+      
+      // Criar arquivo Excel vazio com estrutura básica
+      const emptyData = [{
+        cid_rede: '',
+        estado: '',
+        pop: '',
+        olt: '',
+        slot: '',
+        pon: '',
+        id_cto: '',
+        cto: '',
+        latitude: '',
+        longitude: '',
+        status_cto: '',
+        data_cadastro: '',
+        portas: '',
+        ocupado: '',
+        livre: '',
+        pct_ocup: ''
+      }];
+      
+      const worksheet = XLSX.utils.json_to_sheet(emptyData);
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, 'CTOs');
+      
+      const excelBuffer = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
+      
+      console.log('✅ [Base] Arquivo Excel vazio criado e enviado');
+      
+      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+      res.setHeader('Content-Disposition', 'attachment; filename="base.xlsx"');
+      res.setHeader('Content-Length', excelBuffer.length);
+      res.send(excelBuffer);
+      return;
     }
     
     // Validação extra: garantir que não é um backup
@@ -500,7 +552,20 @@ app.get('/api/base.xlsx', async (req, res) => {
     res.sendFile(path.resolve(currentBasePath));
   } catch (err) {
     console.error('❌ [Base] Erro ao servir base.xlsx:', err);
-    res.status(500).json({ error: 'Erro ao servir arquivo base.xlsx' });
+    console.error('❌ [Base] Stack:', err.stack);
+    
+    // Garantir headers CORS mesmo em erro
+    const origin = req.headers.origin;
+    if (origin) {
+      res.setHeader('Access-Control-Allow-Origin', origin);
+    } else {
+      res.setHeader('Access-Control-Allow-Origin', '*');
+    }
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+    
+    if (!res.headersSent) {
+      res.status(500).json({ error: 'Erro ao servir arquivo base.xlsx', details: err.message });
+    }
   }
 });
 
