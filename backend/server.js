@@ -118,14 +118,17 @@ function formatDateForFilename(date) {
 }
 
 // Função para encontrar o arquivo base_atual mais recente (assíncrona)
+// IMPORTANTE: Esta função NUNCA retorna backups - apenas arquivos base_atual_*.xlsx
 async function findCurrentBaseFile() {
   try {
     const files = await fsPromises.readdir(DATA_DIR);
+    // Filtrar APENAS arquivos base_atual_*.xlsx (NUNCA backups que começam com backup_)
     const baseAtualFiles = files.filter(file => 
-      file.startsWith('base_atual_') && file.endsWith('.xlsx')
+      file.startsWith('base_atual_') && file.endsWith('.xlsx') && !file.startsWith('backup_')
     );
     
     if (baseAtualFiles.length === 0) {
+      console.log('📋 [Base] Nenhum arquivo base_atual encontrado');
       return null;
     }
     
@@ -143,14 +146,18 @@ async function findCurrentBaseFile() {
     );
     
     filesWithStats.sort((a, b) => b.mtime - a.mtime);
-    return filesWithStats[0].path;
+    const mostRecent = filesWithStats[0].path;
+    console.log(`📋 [Base] Base atual encontrada: ${path.basename(mostRecent)} (mais recente de ${baseAtualFiles.length} arquivo(s))`);
+    return mostRecent;
   } catch (err) {
-    console.error('Erro ao buscar arquivo base_atual:', err);
+    console.error('❌ [Base] Erro ao buscar arquivo base_atual:', err);
     return null;
   }
 }
 
 // Função para encontrar o arquivo backup mais recente (assíncrona)
+// IMPORTANTE: Esta função é usada APENAS para limpeza de backups antigos
+// NUNCA é usada para servir dados ao sistema - apenas para gerenciamento de arquivos
 async function findBackupBaseFile() {
   try {
     const files = await fsPromises.readdir(DATA_DIR);
@@ -185,11 +192,13 @@ async function findBackupBaseFile() {
 
 // Função para obter o caminho do arquivo base atual (usa base_atual ou fallback para base.xlsx)
 // Versão síncrona para uso em rotas síncronas
+// IMPORTANTE: Esta função NUNCA retorna backups - apenas arquivos base_atual_*.xlsx
 function getCurrentBaseFilePathSync() {
   try {
     const files = fs.readdirSync(DATA_DIR);
+    // Filtrar APENAS arquivos base_atual_*.xlsx (NUNCA backups que começam com backup_)
     const baseAtualFiles = files.filter(file => 
-      file.startsWith('base_atual_') && file.endsWith('.xlsx')
+      file.startsWith('base_atual_') && file.endsWith('.xlsx') && !file.startsWith('backup_')
     );
     
     if (baseAtualFiles.length > 0) {
@@ -201,28 +210,36 @@ function getCurrentBaseFilePathSync() {
       }));
       
       filesWithStats.sort((a, b) => b.mtime - a.mtime);
-      return filesWithStats[0].path;
+      const mostRecent = filesWithStats[0].path;
+      console.log(`📋 [Base] Base atual (sync): ${path.basename(mostRecent)}`);
+      return mostRecent;
     }
   } catch (err) {
+    console.error('❌ [Base] Erro ao buscar base atual (sync):', err);
     // Ignorar erro e tentar fallback
   }
   
-  // Fallback para compatibilidade com arquivo antigo
+  // Fallback para compatibilidade com arquivo antigo (base.xlsx)
+  // Este fallback é apenas para migração - não deve ser usado em produção
   if (fs.existsSync(BASE_CTOS_FILE)) {
+    console.log('⚠️ [Base] Usando fallback base.xlsx (arquivo antigo)');
     return BASE_CTOS_FILE;
   }
   return null;
 }
 
 // Função assíncrona para obter o caminho do arquivo base atual
+// IMPORTANTE: Esta função NUNCA retorna backups - apenas arquivos base_atual_*.xlsx
 async function getCurrentBaseFilePath() {
   const currentBase = await findCurrentBaseFile();
   if (currentBase) {
     return currentBase;
   }
-  // Fallback para compatibilidade com arquivo antigo
+  // Fallback para compatibilidade com arquivo antigo (base.xlsx)
+  // Este fallback é apenas para migração - não deve ser usado em produção
   try {
     await fsPromises.access(BASE_CTOS_FILE);
+    console.log('⚠️ [Base] Usando fallback base.xlsx (arquivo antigo)');
     return BASE_CTOS_FILE;
   } catch {
     return null;
@@ -326,15 +343,25 @@ if (fs.existsSync(OLD_BASE) && !fs.existsSync(BASE_CTOS_FILE)) {
 })();
 
 // Rota para servir o arquivo base.xlsx (sempre usa base_atual mais recente)
+// IMPORTANTE: Esta rota NUNCA serve backups - apenas arquivos base_atual_*.xlsx
 app.get('/api/base.xlsx', (req, res) => {
   try {
     const currentBasePath = getCurrentBaseFilePathSync();
     if (!currentBasePath || !fs.existsSync(currentBasePath)) {
       return res.status(404).json({ error: 'Arquivo base de dados não encontrado. Carregue uma base de dados em Configurações.' });
     }
+    
+    // Validação extra: garantir que não é um backup
+    const fileName = path.basename(currentBasePath);
+    if (fileName.startsWith('backup_')) {
+      console.error('❌ [Base] ERRO CRÍTICO: Tentativa de servir backup como base atual!');
+      return res.status(500).json({ error: 'Erro interno: arquivo de backup detectado' });
+    }
+    
+    console.log(`📤 [Base] Servindo arquivo: ${fileName}`);
     res.sendFile(path.resolve(currentBasePath));
   } catch (err) {
-    console.error('Erro ao servir base.xlsx:', err);
+    console.error('❌ [Base] Erro ao servir base.xlsx:', err);
     res.status(500).json({ error: 'Erro ao servir arquivo base.xlsx' });
   }
 });
