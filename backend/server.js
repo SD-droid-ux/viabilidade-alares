@@ -1921,22 +1921,39 @@ app.put('/api/projetistas/:nome/name', async (req, res) => {
 
 // Função para validar estrutura do arquivo Excel (ultra-otimizada para não travar)
 // OTIMIZAÇÃO: Aceita tanto Buffer (memória) quanto caminho de arquivo (disco)
+// Validação ultra-leve: apenas verifica se é um arquivo Excel válido
+// A validação detalhada será feita durante o processamento em chunks
 function validateExcelStructure(filePathOrBuffer) {
   try {
-    // Determinar se é caminho de arquivo ou buffer
     const isFilePath = typeof filePathOrBuffer === 'string';
     
-    // Ler apenas metadados primeiro (muito rápido)
-    // Se for caminho de arquivo, ler do disco diretamente (economiza memória)
+    // Para arquivos muito grandes, fazer apenas validação básica
+    // Verificar se o arquivo existe (se for caminho)
+    if (isFilePath && !fs.existsSync(filePathOrBuffer)) {
+      return { valid: false, error: 'Arquivo não encontrado' };
+    }
+    
+    // Verificar extensão do arquivo (se for caminho)
+    if (isFilePath && !filePathOrBuffer.match(/\.(xlsx|xls)$/i)) {
+      return { valid: false, error: 'Arquivo deve ter extensão .xlsx ou .xls' };
+    }
+    
+    // Tentar ler apenas metadados mínimos (sem processar células)
+    // Usar opções ultra-leves para economizar memória
     const workbook = XLSX.read(filePathOrBuffer, { 
       type: isFilePath ? 'file' : 'buffer',
       cellDates: false,
       cellNF: false,
       cellStyles: false,
       sheetStubs: false,
-      dense: false // Não criar array denso (mais rápido)
+      dense: false,
+      // Opções adicionais para reduzir uso de memória
+      bookSheets: false, // Não processar sheets automaticamente
+      bookProps: false, // Não processar propriedades do livro
+      bookFiles: false // Não processar arquivos internos
     });
     
+    // Verificações básicas
     if (!workbook.SheetNames || workbook.SheetNames.length === 0) {
       return { valid: false, error: 'O arquivo Excel não contém planilhas' };
     }
@@ -1944,113 +1961,33 @@ function validateExcelStructure(filePathOrBuffer) {
     const sheetName = workbook.SheetNames[0];
     const worksheet = workbook.Sheets[sheetName];
     
-    // Verificar se a planilha existe e tem dados
     if (!worksheet || !worksheet['!ref']) {
       return { valid: false, error: 'A planilha está vazia ou não contém dados' };
     }
     
-    // Obter range sem processar dados
+    // Obter apenas o range (sem processar dados)
     const range = XLSX.utils.decode_range(worksheet['!ref']);
     const totalRows = range.e.r + 1;
-    const totalCols = range.e.c + 1;
     
-    if (totalRows === 0 || totalCols === 0) {
-      return { valid: false, error: 'O arquivo Excel está vazio ou não contém dados' };
+    if (totalRows <= 1) {
+      return { valid: false, error: 'O arquivo Excel está vazio (apenas cabeçalho ou sem dados)' };
     }
     
-    // Ler apenas primeira linha (cabeçalho) - muito rápido
-    const headerRange = XLSX.utils.encode_range({
-      s: { c: 0, r: 0 },
-      e: { c: range.e.c, r: 0 }
-    });
+    // Limpar referências imediatamente para liberar memória
+    workbook.SheetNames = null;
+    workbook.Sheets = null;
+    worksheet = null;
+    range = null;
     
-    const headerData = XLSX.utils.sheet_to_json(worksheet, { 
-      range: headerRange,
-      defval: '',
-      header: 1 // Retornar como array de arrays (mais rápido)
-    });
-
-    if (!headerData || headerData.length === 0 || !headerData[0]) {
-      return { valid: false, error: 'O arquivo Excel não contém cabeçalho válido' };
-    }
-
-    // Normalizar nomes das colunas (case insensitive) - apenas cabeçalho
-    const headerRow = Array.isArray(headerData[0]) ? headerData[0] : Object.keys(headerData[0]);
-    const columns = headerRow.map(col => String(col).toLowerCase().trim()).filter(col => col);
-
-    // Colunas esperadas na base de dados (estrutura específica)
-    const expectedColumns = [
-      'cid_rede',
-      'estado',
-      'pop',
-      'olt',
-      'slot',
-      'pon',
-      'id_cto',
-      'cto',
-      'latitude',
-      'longitude',
-      'status_cto',
-      'data_cadastro',
-      'portas',
-      'ocupado',
-      'livre',
-      'pct_ocup'
-    ];
-
-    // Verificar quais colunas esperadas estão presentes (case insensitive e com variações)
-    const foundColumns = [];
-    const missingColumns = [];
-    
-    for (const expectedCol of expectedColumns) {
-      const colLower = expectedCol.toLowerCase();
-      // Buscar coluna exata ou similar
-      const found = columns.some(col => {
-        const normalizedCol = col.toLowerCase().trim();
-        // Verificar correspondência exata ou parcial
-        return normalizedCol === colLower || 
-               normalizedCol === colLower.replace('_', ' ') ||
-               normalizedCol.includes(colLower) ||
-               colLower.includes(normalizedCol);
-      });
-      
-      if (found) {
-        foundColumns.push(expectedCol);
-      } else {
-        missingColumns.push(expectedCol);
-      }
-    }
-
-    // Colunas críticas (latitude e longitude são essenciais para o funcionamento)
-    const criticalColumns = ['latitude', 'longitude'];
-    const missingCritical = criticalColumns.filter(col => 
-      !foundColumns.some(found => found.toLowerCase() === col.toLowerCase())
-    );
-
-    // Se faltar colunas críticas, bloquear
-    if (missingCritical.length > 0) {
-      return {
-        valid: false,
-        error: `Colunas críticas não encontradas: ${missingCritical.join(', ')}\n\nColunas encontradas: ${columns.join(', ')}\n\nColunas esperadas: ${expectedColumns.join(', ')}`
-      };
-    }
-
-    // Log das colunas encontradas para debug
-    console.log(`📋 Colunas encontradas: ${columns.join(', ')}`);
-    console.log(`✅ Colunas esperadas encontradas: ${foundColumns.length}/${expectedColumns.length}`);
-    if (missingColumns.length > 0) {
-      console.log(`⚠️ Colunas não encontradas (opcionais): ${missingColumns.join(', ')}`);
-    }
-
-    // Validação simplificada: apenas verificar se tem colunas corretas no cabeçalho
-    // Não validar dados das linhas - aceitar qualquer arquivo com estrutura correta
-    console.log(`✅ Validação de estrutura concluída: ${foundColumns.length}/${expectedColumns.length} colunas encontradas`);
-    console.log(`ℹ️ Arquivo aceito - validação apenas de colunas do cabeçalho`);
+    // Validação detalhada será feita durante processamento em chunks
+    // Retornar apenas que o arquivo é válido estruturalmente
+    console.log(`✅ [Validação] Arquivo Excel válido: ${totalRows} linhas detectadas`);
+    console.log(`ℹ️ [Validação] Validação detalhada será feita durante processamento em chunks`);
     
     return {
       valid: true,
       totalRows: totalRows,
-      validRows: totalRows - 1, // Assumir todas menos cabeçalho são válidas
+      validRows: totalRows - 1, // Assumir todas menos cabeçalho (validação detalhada depois)
       invalidRows: 0
     };
   } catch (err) {
@@ -2218,27 +2155,8 @@ app.post('/api/upload-base', (req, res, next) => {
     (async () => {
       let tempFileDeleted = false;
       try {
-        console.log('🔍 [Background] Iniciando validação do arquivo...');
-        
-        // OTIMIZAÇÃO DE MEMÓRIA: Validar diretamente do arquivo no disco
-        // Isso evita carregar o arquivo inteiro na memória
-        const validation = validateExcelStructure(tempFilePath);
-        console.log(`📊 [Background] Resultado da validação:`, validation);
-        
-        if (!validation.valid) {
-          console.error(`❌ [Background] Validação falhou: ${validation.error}`);
-          // Deletar arquivo temporário
-          try {
-            await fsPromises.unlink(tempFilePath);
-            tempFileDeleted = true;
-            console.log('🗑️ [Background] Arquivo temporário removido após validação falhar');
-          } catch (unlinkErr) {
-            console.error('❌ [Background] Erro ao remover arquivo temporário:', unlinkErr);
-          }
-          return;
-        }
-
-        console.log(`✅ [Background] Validação bem-sucedida: ${validation.validRows} linhas válidas de ${validation.totalRows} total`);
+        console.log('🔍 [Background] Iniciando processamento do arquivo...');
+        console.log('ℹ️ [Background] Validação será feita durante processamento em chunks (economiza memória)');
         
         // Obter data atual para nomear arquivos
         const now = new Date();
@@ -2253,26 +2171,60 @@ app.post('/api/upload-base', (req, res, next) => {
             console.log('📤 [Background] Processando Excel em chunks para economizar memória...');
             
             // OTIMIZAÇÃO DE MEMÓRIA: Processar Excel em chunks
-            // Ler apenas metadados primeiro para saber quantas linhas temos
-            const workbook = XLSX.readFile(tempFilePath, { 
-              cellDates: false,
-              cellNF: false,
-              cellStyles: false,
-              sheetStubs: false
-            });
-            const sheetName = workbook.SheetNames[0];
-            const worksheet = workbook.Sheets[sheetName];
+            // Ler apenas metadados mínimos (sem processar células) para saber quantas linhas temos
+            // Usar opções ultra-leves para reduzir uso de memória
+            let workbook, sheetName, worksheet, range, totalRows;
             
-            // Obter range de linhas do worksheet
-            const range = XLSX.utils.decode_range(worksheet['!ref'] || 'A1');
-            const totalRows = range.e.r + 1; // +1 porque range é 0-indexed
+            try {
+              workbook = XLSX.readFile(tempFilePath, { 
+                cellDates: false,
+                cellNF: false,
+                cellStyles: false,
+                sheetStubs: false,
+                bookSheets: false,
+                bookProps: false,
+                bookFiles: false
+              });
+              
+              if (!workbook.SheetNames || workbook.SheetNames.length === 0) {
+                throw new Error('Arquivo Excel não contém planilhas');
+              }
+              
+              sheetName = workbook.SheetNames[0];
+              worksheet = workbook.Sheets[sheetName];
+              
+              if (!worksheet || !worksheet['!ref']) {
+                throw new Error('Planilha está vazia ou não contém dados');
+              }
+              
+              // Obter range de linhas do worksheet
+              range = XLSX.utils.decode_range(worksheet['!ref'] || 'A1');
+              totalRows = range.e.r + 1; // +1 porque range é 0-indexed
+              
+              if (totalRows <= 1) {
+                throw new Error('Arquivo Excel está vazio (apenas cabeçalho ou sem dados)');
+              }
+              
+              console.log(`📊 [Background] Total de linhas no Excel: ${totalRows}`);
+            } catch (readErr) {
+              console.error('❌ [Background] Erro ao ler metadados do Excel:', readErr.message);
+              throw new Error(`Arquivo Excel inválido ou corrompido: ${readErr.message}`);
+            }
             
-            console.log(`📊 [Background] Total de linhas no Excel: ${totalRows}`);
-            
-            // Processar em chunks para economizar memória
-            const CHUNK_SIZE = 5000; // Processar 5000 linhas por vez
+            // Processar em chunks menores para economizar memória
+            const CHUNK_SIZE = 2000; // Reduzido para 2000 linhas por vez (economiza mais memória)
             const totalChunks = Math.ceil(totalRows / CHUNK_SIZE);
             console.log(`📦 [Background] Processando em ${totalChunks} chunk(s) de até ${CHUNK_SIZE} linhas cada...`);
+            
+            // Limpar workbook imediatamente após obter metadados (não manter referência completa)
+            // Vamos recriar apenas o necessário para cada chunk
+            const workbookRef = {
+              SheetNames: workbook.SheetNames,
+              Sheets: workbook.Sheets
+            };
+            
+            // Limpar referência original
+            workbook = null;
             
             // Função auxiliar para converter data
             const parseDate = (value) => {
@@ -2330,26 +2282,35 @@ app.post('/api/upload-base', (req, res, next) => {
               
               console.log(`📦 [Background] Processando chunk ${chunkNumber}/${totalChunks} (linhas ${chunkStart + 1}-${chunkEnd})...`);
               
-              // Ler apenas este chunk do Excel
+              // Ler apenas este chunk do Excel diretamente do worksheet original
+              // Usar range para limitar o que é processado
               const chunkRange = XLSX.utils.encode_range({
                 s: { c: 0, r: chunkStart },
                 e: { c: range.e.c, r: chunkEnd - 1 }
               });
               
-              // Criar worksheet temporário apenas com este chunk
+              // Criar worksheet temporário apenas com este chunk (copiar apenas células necessárias)
               const chunkWorksheet = {};
               for (let R = chunkStart; R < chunkEnd; R++) {
                 for (let C = 0; C <= range.e.c; C++) {
                   const cellAddress = XLSX.utils.encode_cell({ r: R, c: C });
                   if (worksheet[cellAddress]) {
-                    chunkWorksheet[cellAddress] = worksheet[cellAddress];
+                    // Copiar apenas valor e tipo (não copiar formatação completa)
+                    chunkWorksheet[cellAddress] = {
+                      t: worksheet[cellAddress].t,
+                      v: worksheet[cellAddress].v,
+                      w: worksheet[cellAddress].w
+                    };
                   }
                 }
               }
               chunkWorksheet['!ref'] = chunkRange;
               
-              // Converter chunk para JSON
-              const chunkData = XLSX.utils.sheet_to_json(chunkWorksheet);
+              // Converter chunk para JSON (apenas este range)
+              const chunkData = XLSX.utils.sheet_to_json(chunkWorksheet, {
+                defval: '',
+                raw: false // Converter valores formatados
+              });
               
               // Processar chunk
               let chunkValid = 0;
@@ -2640,7 +2601,7 @@ app.post('/api/upload-base', (req, res, next) => {
         }
         
         console.log(`✅ [Background] Nova base de dados salva com sucesso: ${newBaseFileName}`);
-        console.log(`✅ [Background] Processamento concluído: ${validation.validRows} linhas válidas de ${validation.totalRows} total`);
+        console.log(`✅ [Background] Processamento concluído`);
         if (supabaseImported) {
           console.log(`✅ [Background] ${importedRows} CTOs importadas no Supabase`);
         } else {
