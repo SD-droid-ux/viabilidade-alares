@@ -1308,61 +1308,119 @@ app.post('/api/upload-base', (req, res, next) => {
         const now = new Date();
         const dateStr = formatDateForFilename(now);
         
-        // Processar operações de arquivo em paralelo e de forma assíncrona
-        // Encontrar arquivos existentes (assíncrono)
+        // Processar operações de arquivo de forma sequencial e segura
         console.log('📂 [Background] Procurando arquivos existentes...');
-        const [currentBasePath, backupBasePath] = await Promise.all([
-          findCurrentBaseFile(),
-          findBackupBaseFile()
-        ]);
         
-        // Preparar operações de arquivo para executar em paralelo quando possível
-        const fileOperations = [];
+        // 1. Encontrar TODAS as bases antigas (base_atual_*.xlsx)
+        const allFiles = await fsPromises.readdir(DATA_DIR);
+        const allBaseAtualFiles = allFiles.filter(file => 
+          file.startsWith('base_atual_') && file.endsWith('.xlsx')
+        );
         
-        // Se existe base_atual e backup, apagar o backup antigo (assíncrono)
-        if (currentBasePath && backupBasePath) {
-          fileOperations.push(
-            fsPromises.unlink(backupBasePath).then(() => {
-              console.log(`🗑️ [Background] Backup antigo removido: ${path.basename(backupBasePath)}`);
-            }).catch(err => {
-              console.error('❌ [Background] Erro ao remover backup antigo:', err);
-            })
-          );
-        }
+        console.log(`📋 [Background] Encontradas ${allBaseAtualFiles.length} base(s) antiga(s) para substituir`);
         
-        // Se existe base_atual, renomear para backup (assíncrono)
+        // 2. Encontrar a base atual mais recente (se existir) para fazer backup
+        const currentBasePath = await findCurrentBaseFile();
+        
+        // 3. Se existe base atual, criar backup ANTES de deletar
         if (currentBasePath) {
           const backupFileName = `backup_${dateStr}.xlsx`;
           const newBackupPath = path.join(DATA_DIR, backupFileName);
-          fileOperations.push(
-            fsPromises.rename(currentBasePath, newBackupPath).then(() => {
-              console.log(`💾 [Background] Base atual movida para backup: ${backupFileName}`);
-            }).catch(err => {
-              console.error('❌ [Background] Erro ao criar backup da base atual:', err);
-              // Tentar copiar ao invés de renomear
-              return fsPromises.copyFile(currentBasePath, newBackupPath).then(() => {
-                console.log(`💾 [Background] Backup criado por cópia: ${backupFileName}`);
-              }).catch(copyErr => {
-                console.error('❌ [Background] Erro ao copiar para backup:', copyErr);
-              });
-            })
-          );
+          
+          // Criar backup da base atual (renomear ou copiar)
+          try {
+            await fsPromises.rename(currentBasePath, newBackupPath);
+            console.log(`💾 [Background] Base atual movida para backup: ${backupFileName}`);
+          } catch (err) {
+            console.warn('⚠️ [Background] Erro ao renomear, tentando copiar...', err.message);
+            try {
+              await fsPromises.copyFile(currentBasePath, newBackupPath);
+              console.log(`💾 [Background] Backup criado por cópia: ${backupFileName}`);
+            } catch (copyErr) {
+              console.error('❌ [Background] Erro ao copiar para backup:', copyErr);
+              // Continuar mesmo se backup falhar
+            }
+          }
         }
         
-        // Salvar novo arquivo como base_atual_DD-MM-YYYY.xlsx (assíncrono)
+        // 5. DELETAR TODAS as bases antigas (base_atual_*.xlsx)
+        // Isso garante que não fiquem múltiplas bases antigas
+        // IMPORTANTE: Não deletar a base atual se ela ainda existir (caso backup foi feito por cópia)
+        for (const oldFile of allBaseAtualFiles) {
+          const oldFilePath = path.join(DATA_DIR, oldFile);
+          
+          // Se esta é a base atual e ainda existe (backup foi feito por cópia), pular
+          if (currentBasePath && oldFilePath === currentBasePath && fs.existsSync(currentBasePath)) {
+            console.log(`⏭️ [Background] Pulando base atual (já tem backup): ${oldFile}`);
+            continue;
+          }
+          
+          try {
+            await fsPromises.unlink(oldFilePath);
+            console.log(`🗑️ [Background] Base antiga removida: ${oldFile}`);
+          } catch (err) {
+            console.error(`❌ [Background] Erro ao remover base antiga ${oldFile}:`, err.message);
+            // Continuar mesmo se uma falhar
+          }
+        }
+        
+        // Se a base atual ainda existe após backup (foi copiada, não renomeada), deletá-la agora
+        if (currentBasePath && fs.existsSync(currentBasePath)) {
+          try {
+            await fsPromises.unlink(currentBasePath);
+            console.log(`🗑️ [Background] Base atual original removida após backup: ${path.basename(currentBasePath)}`);
+          } catch (err) {
+            console.error(`❌ [Background] Erro ao remover base atual original:`, err.message);
+            // Continuar mesmo se falhar
+          }
+        }
+        
+        // 6. Limpar backups antigos (manter apenas os 3 mais recentes)
+        const allBackupFiles = allFiles.filter(file => 
+          file.startsWith('backup_') && file.endsWith('.xlsx')
+        );
+        
+        if (allBackupFiles.length > 3) {
+          // Obter stats de todos os backups
+          const backupFilesWithStats = await Promise.all(
+            allBackupFiles.map(async (file) => {
+              const filePath = path.join(DATA_DIR, file);
+              const stats = await fsPromises.stat(filePath);
+              return {
+                name: file,
+                path: filePath,
+                mtime: stats.mtime
+              };
+            })
+          );
+          
+          // Ordenar por data (mais recente primeiro)
+          backupFilesWithStats.sort((a, b) => b.mtime - a.mtime);
+          
+          // Deletar backups antigos (manter apenas os 3 mais recentes)
+          const backupsToDelete = backupFilesWithStats.slice(3);
+          for (const backup of backupsToDelete) {
+            try {
+              await fsPromises.unlink(backup.path);
+              console.log(`🗑️ [Background] Backup antigo removido: ${backup.name}`);
+            } catch (err) {
+              console.error(`❌ [Background] Erro ao remover backup antigo ${backup.name}:`, err.message);
+            }
+          }
+        }
+        
+        // 7. Salvar NOVA base como base_atual_DD-MM-YYYY.xlsx
         const newBaseFileName = `base_atual_${dateStr}.xlsx`;
         const newBasePath = path.join(DATA_DIR, newBaseFileName);
         
-        console.log(`💾 [Background] Salvando arquivo: ${newBaseFileName} (${req.file.size} bytes)`);
+        console.log(`💾 [Background] Salvando nova base: ${newBaseFileName} (${req.file.size} bytes)`);
         
-        // Executar todas as operações de arquivo em paralelo
-        await Promise.all([
-          ...fileOperations,
-          fsPromises.writeFile(newBasePath, req.file.buffer)
-        ]);
+        // Salvar novo arquivo
+        await fsPromises.writeFile(newBasePath, req.file.buffer);
         
-        console.log(`✅ [Background] Base de dados salva com sucesso: ${newBaseFileName}`);
+        console.log(`✅ [Background] Nova base de dados salva com sucesso: ${newBaseFileName}`);
         console.log(`✅ [Background] Processamento concluído: ${validation.validRows} linhas válidas de ${validation.totalRows} total`);
+        console.log(`✅ [Background] Base antiga substituída - sistema agora usa: ${newBaseFileName}`);
       } catch (err) {
         console.error('❌ [Background] Erro ao processar arquivo em background:', err);
         console.error('❌ [Background] Stack:', err.stack);
