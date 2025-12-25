@@ -79,6 +79,14 @@ app.use((req, res, next) => {
   next();
 });
 
+// Criar pasta data se não existir
+// Permite configurar via variável de ambiente (útil para Railway volumes)
+// IMPORTANTE: Definir DATA_DIR ANTES de usar no multer
+const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');
+if (!fs.existsSync(DATA_DIR)) {
+  fs.mkdirSync(DATA_DIR, { recursive: true });
+}
+
 // Configurar multer para upload de arquivos
 // OTIMIZAÇÃO DE MEMÓRIA: Usar diskStorage em vez de memoryStorage
 // Isso evita carregar arquivos grandes na memória, prevenindo "Out of memory" no Railway
@@ -112,13 +120,6 @@ try {
   console.error('❌ Erro ao configurar multer:', err);
   console.error('Certifique-se de que o multer está instalado: npm install multer');
   process.exit(1);
-}
-
-// Criar pasta data se não existir
-// Permite configurar via variável de ambiente (útil para Railway volumes)
-const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');
-if (!fs.existsSync(DATA_DIR)) {
-  fs.mkdirSync(DATA_DIR, { recursive: true });
 }
 
 // Caminhos para os arquivos Excel na pasta backend/data
