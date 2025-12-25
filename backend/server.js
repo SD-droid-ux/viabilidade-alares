@@ -2250,222 +2250,253 @@ app.post('/api/upload-base', (req, res, next) => {
         if (supabase && isSupabaseAvailable()) {
           try {
             console.log('📤 [Background] ===== INICIANDO IMPORTAÇÃO SUPABASE =====');
-            console.log('📤 [Background] Lendo dados do Excel para importar no Supabase...');
+            console.log('📤 [Background] Processando Excel em chunks para economizar memória...');
             
-            // Ler dados do arquivo Excel
-            const workbook = XLSX.readFile(tempFilePath);
+            // OTIMIZAÇÃO DE MEMÓRIA: Processar Excel em chunks
+            // Ler apenas metadados primeiro para saber quantas linhas temos
+            const workbook = XLSX.readFile(tempFilePath, { 
+              cellDates: false,
+              cellNF: false,
+              cellStyles: false,
+              sheetStubs: false
+            });
             const sheetName = workbook.SheetNames[0];
             const worksheet = workbook.Sheets[sheetName];
-            const excelData = XLSX.utils.sheet_to_json(worksheet);
             
-            console.log(`📊 [Background] Total de linhas no Excel: ${excelData.length}`);
+            // Obter range de linhas do worksheet
+            const range = XLSX.utils.decode_range(worksheet['!ref'] || 'A1');
+            const totalRows = range.e.r + 1; // +1 porque range é 0-indexed
             
-            if (excelData && excelData.length > 0) {
-              // Mostrar primeiras colunas encontradas para debug
-              if (excelData.length > 0) {
-                const firstRow = excelData[0];
-                const columns = Object.keys(firstRow);
-                console.log(`📋 [Background] Colunas encontradas no Excel (${columns.length}):`, columns.slice(0, 10).join(', '), columns.length > 10 ? '...' : '');
+            console.log(`📊 [Background] Total de linhas no Excel: ${totalRows}`);
+            
+            // Processar em chunks para economizar memória
+            const CHUNK_SIZE = 5000; // Processar 5000 linhas por vez
+            const totalChunks = Math.ceil(totalRows / CHUNK_SIZE);
+            console.log(`📦 [Background] Processando em ${totalChunks} chunk(s) de até ${CHUNK_SIZE} linhas cada...`);
+            
+            // Função auxiliar para converter data
+            const parseDate = (value) => {
+              if (!value) return null;
+              if (value instanceof Date) return value.toISOString().split('T')[0];
+              if (typeof value === 'string') {
+                const date = new Date(value);
+                if (!isNaN(date.getTime())) {
+                  return date.toISOString().split('T')[0];
+                }
+              }
+              if (typeof value === 'number') {
+                const date = XLSX.SSF.parse_date_code(value);
+                if (date) {
+                  return `${date.y}-${String(date.m).padStart(2, '0')}-${String(date.d).padStart(2, '0')}`;
+                }
+              }
+              return null;
+            };
+            
+            // Função para normalizar chaves
+            const normalizeKey = (key) => {
+              const lower = String(key || '').toLowerCase().trim();
+              const mapping = {
+                'cid_rede': 'cid_rede', 'cid rede': 'cid_rede', 'estado': 'estado', 'pop': 'pop',
+                'olt': 'olt', 'slot': 'slot', 'pon': 'pon', 'id_cto': 'id_cto', 'id cto': 'id_cto', 'cto': 'cto',
+                'latitude': 'latitude', 'lat': 'latitude', 'longitude': 'longitude', 'long': 'longitude', 'lng': 'longitude',
+                'status_cto': 'status_cto', 'status cto': 'status_cto', 'data_cadastro': 'data_cadastro', 'data cadastro': 'data_cadastro',
+                'portas': 'portas', 'ocupado': 'ocupado', 'livre': 'livre', 'pct_ocup': 'pct_ocup', 'pct ocup': 'pct_ocup'
+              };
+              return mapping[lower] || lower;
+            };
+            
+            // Deletar todas as CTOs existentes antes de importar
+            console.log('🗑️ [Background] Limpando CTOs antigas do Supabase...');
+            const { error: deleteError, count: deleteCount } = await supabase
+              .from('ctos')
+              .delete()
+              .neq('id', 0);
+            
+            if (deleteError) {
+              console.error('❌ [Background] Erro ao limpar CTOs antigas:', deleteError);
+              throw deleteError;
+            }
+            console.log(`✅ [Background] CTOs antigas removidas (${deleteCount || 'N/A'} registros)`);
+            
+            // Processar e importar em chunks
+            let totalValid = 0;
+            let totalInvalid = 0;
+            const BATCH_SIZE = 1000; // Tamanho do lote para Supabase
+            
+            for (let chunkStart = 0; chunkStart < totalRows; chunkStart += CHUNK_SIZE) {
+              const chunkEnd = Math.min(chunkStart + CHUNK_SIZE, totalRows);
+              const chunkNumber = Math.floor(chunkStart / CHUNK_SIZE) + 1;
+              
+              console.log(`📦 [Background] Processando chunk ${chunkNumber}/${totalChunks} (linhas ${chunkStart + 1}-${chunkEnd})...`);
+              
+              // Ler apenas este chunk do Excel
+              const chunkRange = XLSX.utils.encode_range({
+                s: { c: 0, r: chunkStart },
+                e: { c: range.e.c, r: chunkEnd - 1 }
+              });
+              
+              // Criar worksheet temporário apenas com este chunk
+              const chunkWorksheet = {};
+              for (let R = chunkStart; R < chunkEnd; R++) {
+                for (let C = 0; C <= range.e.c; C++) {
+                  const cellAddress = XLSX.utils.encode_cell({ r: R, c: C });
+                  if (worksheet[cellAddress]) {
+                    chunkWorksheet[cellAddress] = worksheet[cellAddress];
+                  }
+                }
+              }
+              chunkWorksheet['!ref'] = chunkRange;
+              
+              // Converter chunk para JSON
+              const chunkData = XLSX.utils.sheet_to_json(chunkWorksheet);
+              
+              // Processar chunk
+              let chunkValid = 0;
+              let chunkInvalid = 0;
+              const ctosToImport = [];
+              
+              for (let index = 0; index < chunkData.length; index++) {
+                const row = chunkData[index];
+                try {
+                  const normalizedRow = {};
+                  for (const key in row) {
+                    const normalizedKey = normalizeKey(key);
+                    normalizedRow[normalizedKey] = row[key];
+                  }
+                  
+                  let lat = normalizedRow.latitude;
+                  let lng = normalizedRow.longitude;
+                  
+                  if (typeof lat === 'string') {
+                    lat = lat.replace(',', '.');
+                    lat = parseFloat(lat);
+                  }
+                  if (typeof lng === 'string') {
+                    lng = lng.replace(',', '.');
+                    lng = parseFloat(lng);
+                  }
+                  
+                  const cto = {
+                    cid_rede: normalizedRow.cid_rede || null,
+                    estado: normalizedRow.estado || null,
+                    pop: normalizedRow.pop || null,
+                    olt: normalizedRow.olt || null,
+                    slot: normalizedRow.slot || null,
+                    pon: normalizedRow.pon || null,
+                    id_cto: normalizedRow.id_cto || null,
+                    cto: normalizedRow.cto || null,
+                    latitude: (lat && !isNaN(lat)) ? lat : null,
+                    longitude: (lng && !isNaN(lng)) ? lng : null,
+                    status_cto: normalizedRow.status_cto || null,
+                    data_cadastro: parseDate(normalizedRow.data_cadastro),
+                    portas: normalizedRow.portas ? parseInt(normalizedRow.portas) : null,
+                    ocupado: normalizedRow.ocupado ? parseInt(normalizedRow.ocupado) : null,
+                    livre: normalizedRow.livre ? parseInt(normalizedRow.livre) : null,
+                    pct_ocup: normalizedRow.pct_ocup ? parseFloat(normalizedRow.pct_ocup) : null
+                  };
+                  
+                  if (cto.latitude && cto.longitude && 
+                      !isNaN(cto.latitude) && !isNaN(cto.longitude) &&
+                      cto.latitude >= -90 && cto.latitude <= 90 &&
+                      cto.longitude >= -180 && cto.longitude <= 180) {
+                    chunkValid++;
+                    ctosToImport.push(cto);
+                  } else {
+                    chunkInvalid++;
+                  }
+                } catch (rowErr) {
+                  chunkInvalid++;
+                }
               }
               
-              // Função auxiliar para converter data
-              const parseDate = (value) => {
-                if (!value) return null;
-                if (value instanceof Date) return value.toISOString().split('T')[0];
-                if (typeof value === 'string') {
-                  // Tentar parsear diferentes formatos
-                  const date = new Date(value);
-                  if (!isNaN(date.getTime())) {
-                    return date.toISOString().split('T')[0];
-                  }
-                }
-                if (typeof value === 'number') {
-                  // Excel serial date
-                  const date = XLSX.SSF.parse_date_code(value);
-                  if (date) {
-                    return `${date.y}-${String(date.m).padStart(2, '0')}-${String(date.d).padStart(2, '0')}`;
-                  }
-                }
-                return null;
-              };
+              totalValid += chunkValid;
+              totalInvalid += chunkInvalid;
               
-              // Converter para formato Supabase
-              let validCount = 0;
-              let invalidCount = 0;
-              const ctosToImport = excelData
-                .map((row, index) => {
-                  try {
-                    // Normalizar nomes de colunas (case insensitive)
-                    const normalizeKey = (key) => {
-                      const lower = String(key || '').toLowerCase().trim();
-                      const mapping = {
-                        'cid_rede': 'cid_rede',
-                        'cid rede': 'cid_rede',
-                        'estado': 'estado',
-                        'pop': 'pop',
-                        'olt': 'olt',
-                        'slot': 'slot',
-                        'pon': 'pon',
-                        'id_cto': 'id_cto',
-                        'id cto': 'id_cto',
-                        'cto': 'cto',
-                        'latitude': 'latitude',
-                        'lat': 'latitude',
-                        'longitude': 'longitude',
-                        'long': 'longitude',
-                        'lng': 'longitude',
-                        'status_cto': 'status_cto',
-                        'status cto': 'status_cto',
-                        'data_cadastro': 'data_cadastro',
-                        'data cadastro': 'data_cadastro',
-                        'portas': 'portas',
-                        'ocupado': 'ocupado',
-                        'livre': 'livre',
-                        'pct_ocup': 'pct_ocup',
-                        'pct ocup': 'pct_ocup'
-                      };
-                      return mapping[lower] || lower;
-                    };
-                    
-                    const normalizedRow = {};
-                    for (const key in row) {
-                      const normalizedKey = normalizeKey(key);
-                      normalizedRow[normalizedKey] = row[key];
-                    }
-                    
-                    // Converter valores
-                    let lat = normalizedRow.latitude;
-                    let lng = normalizedRow.longitude;
-                    
-                    // Tentar converter para número se for string
-                    if (typeof lat === 'string') {
-                      lat = lat.replace(',', '.');
-                      lat = parseFloat(lat);
-                    }
-                    if (typeof lng === 'string') {
-                      lng = lng.replace(',', '.');
-                      lng = parseFloat(lng);
-                    }
-                    
-                    const cto = {
-                      cid_rede: normalizedRow.cid_rede || null,
-                      estado: normalizedRow.estado || null,
-                      pop: normalizedRow.pop || null,
-                      olt: normalizedRow.olt || null,
-                      slot: normalizedRow.slot || null,
-                      pon: normalizedRow.pon || null,
-                      id_cto: normalizedRow.id_cto || null,
-                      cto: normalizedRow.cto || null,
-                      latitude: (lat && !isNaN(lat)) ? lat : null,
-                      longitude: (lng && !isNaN(lng)) ? lng : null,
-                      status_cto: normalizedRow.status_cto || null,
-                      data_cadastro: parseDate(normalizedRow.data_cadastro),
-                      portas: normalizedRow.portas ? parseInt(normalizedRow.portas) : null,
-                      ocupado: normalizedRow.ocupado ? parseInt(normalizedRow.ocupado) : null,
-                      livre: normalizedRow.livre ? parseInt(normalizedRow.livre) : null,
-                      pct_ocup: normalizedRow.pct_ocup ? parseFloat(normalizedRow.pct_ocup) : null
-                    };
-                    
-                    // Filtrar apenas linhas com coordenadas válidas (essenciais)
-                    if (cto.latitude && cto.longitude && 
-                        !isNaN(cto.latitude) && !isNaN(cto.longitude) &&
-                        cto.latitude >= -90 && cto.latitude <= 90 &&
-                        cto.longitude >= -180 && cto.longitude <= 180) {
-                      validCount++;
-                      return cto;
-                    }
-                    invalidCount++;
-                    return null;
-                  } catch (rowErr) {
-                    console.warn(`⚠️ [Background] Erro ao processar linha ${index + 1}:`, rowErr.message);
-                    invalidCount++;
-                    return null;
-                  }
-                })
-                .filter(cto => cto !== null); // Remover inválidos
+              console.log(`📊 [Background] Chunk ${chunkNumber}: ${chunkValid} válidas, ${chunkInvalid} inválidas`);
               
-              console.log(`📊 [Background] CTOs processadas: ${validCount} válidas, ${invalidCount} inválidas`);
-              console.log(`📊 [Background] Total de CTOs para importar: ${ctosToImport.length}`);
-              
+              // Importar chunk no Supabase em lotes
               if (ctosToImport.length > 0) {
-                // Deletar todas as CTOs existentes antes de importar (substituição completa)
-                console.log('🗑️ [Background] Limpando CTOs antigas do Supabase...');
-                const { error: deleteError, count: deleteCount } = await supabase
-                  .from('ctos')
-                  .delete()
-                  .neq('id', 0); // Deletar todos
-                
-                if (deleteError) {
-                  console.error('❌ [Background] Erro ao limpar CTOs antigas:', deleteError);
-                  console.error('❌ [Background] Detalhes do erro:', JSON.stringify(deleteError, null, 2));
-                  throw deleteError;
-                }
-                
-                console.log(`✅ [Background] CTOs antigas removidas (${deleteCount || 'N/A'} registros)`);
-                
-                // Importar em lotes de 1000 para melhor performance
-                const BATCH_SIZE = 1000;
-                let imported = 0;
-                const totalBatches = Math.ceil(ctosToImport.length / BATCH_SIZE);
-                
-                console.log(`📦 [Background] Importando em ${totalBatches} lote(s) de até ${BATCH_SIZE} registros cada...`);
-                
                 for (let i = 0; i < ctosToImport.length; i += BATCH_SIZE) {
                   const batch = ctosToImport.slice(i, i + BATCH_SIZE);
                   const batchNumber = Math.floor(i / BATCH_SIZE) + 1;
+                  const totalBatches = Math.ceil(ctosToImport.length / BATCH_SIZE);
                   
-                  console.log(`📦 [Background] Importando lote ${batchNumber}/${totalBatches} (${batch.length} registros)...`);
-                  
-                  const { error: insertError, data: insertData } = await supabase
+                  const { error: insertError } = await supabase
                     .from('ctos')
-                    .insert(batch)
-                    .select('id');
+                    .insert(batch);
                   
                   if (insertError) {
-                    console.error(`❌ [Background] Erro ao importar lote ${batchNumber}:`, insertError);
-                    console.error(`❌ [Background] Detalhes do erro:`, JSON.stringify(insertError, null, 2));
-                    console.error(`❌ [Background] Primeiro registro do lote:`, JSON.stringify(batch[0], null, 2));
+                    console.error(`❌ [Background] Erro ao importar lote ${batchNumber}/${totalBatches} do chunk ${chunkNumber}:`, insertError);
                     throw insertError;
                   }
                   
-                  imported += batch.length;
-                  console.log(`✅ [Background] Lote ${batchNumber}/${totalBatches} importado: ${imported}/${ctosToImport.length} CTOs`);
+                  importedRows += batch.length;
                 }
-                
-                importedRows = imported;
-                supabaseImported = true;
-                
-                // Registrar no histórico de uploads
-                try {
-                  const { error: historyError } = await supabase
-                    .from('upload_history')
-                    .insert([{
-                      file_name: fileName,
-                      file_size: fileSize,
-                      total_rows: excelData.length,
-                      valid_rows: importedRows,
-                      uploaded_by: req.body?.usuario || req.user?.nome || 'Sistema'
-                    }]);
-                  
-                  if (historyError) {
-                    console.warn('⚠️ [Background] Erro ao registrar histórico (não crítico):', historyError);
-                  } else {
-                    console.log('✅ [Background] Histórico de upload registrado');
-                  }
-                } catch (historyErr) {
-                  console.warn('⚠️ [Background] Erro ao registrar histórico (não crítico):', historyErr.message);
-                }
-                
-                console.log(`✅ [Background] ===== IMPORTAÇÃO SUPABASE CONCLUÍDA =====`);
-                console.log(`✅ [Background] ${importedRows} CTOs importadas com sucesso no Supabase!`);
-              } else {
-                console.warn('⚠️ [Background] Nenhuma CTO válida encontrada para importar');
-                console.warn(`⚠️ [Background] Total de linhas no Excel: ${excelData.length}`);
-                console.warn(`⚠️ [Background] Linhas válidas: ${validCount}, Linhas inválidas: ${invalidCount}`);
-                console.warn(`⚠️ [Background] Verifique se o Excel contém colunas 'latitude' e 'longitude' com valores válidos`);
+                console.log(`✅ [Background] Chunk ${chunkNumber} importado: ${ctosToImport.length} CTOs (total: ${importedRows})`);
               }
+              
+              // Limpar variáveis do chunk para liberar memória
+              chunkWorksheet = null;
+              chunkData = null;
+              ctosToImport.length = 0; // Limpar array
+              
+              // Forçar garbage collection (se disponível)
+              if (global.gc) {
+                global.gc();
+              }
+            }
+            
+            console.log(`📊 [Background] Total processado: ${totalValid} válidas, ${totalInvalid} inválidas`);
+            
+            // Mostrar primeiras colunas encontradas para debug (antes de limpar)
+            if (totalRows > 0 && worksheet) {
+              try {
+                const firstChunkData = XLSX.utils.sheet_to_json(worksheet, { range: `A1:${String.fromCharCode(65 + range.e.c)}1` });
+                if (firstChunkData.length > 0) {
+                  const columns = Object.keys(firstChunkData[0]);
+                  console.log(`📋 [Background] Colunas encontradas no Excel (${columns.length}):`, columns.slice(0, 10).join(', '), columns.length > 10 ? '...' : '');
+                }
+              } catch (colErr) {
+                // Ignorar erro ao ler colunas (não crítico)
+              }
+            }
+            
+            // Limpar referências para liberar memória
+            workbook.SheetNames = null;
+            workbook.Sheets = null;
+            worksheet = null;
+            range = null;
+            
+            if (importedRows > 0) {
+              supabaseImported = true;
+              
+              // Registrar no histórico de uploads
+              try {
+                const { error: historyError } = await supabase
+                  .from('upload_history')
+                  .insert([{
+                    file_name: fileName,
+                    file_size: fileSize,
+                    total_rows: totalRows,
+                    valid_rows: importedRows,
+                    uploaded_by: req.body?.usuario || req.user?.nome || 'Sistema'
+                  }]);
+                
+                if (historyError) {
+                  console.warn('⚠️ [Background] Erro ao registrar histórico (não crítico):', historyError);
+                } else {
+                  console.log('✅ [Background] Histórico de upload registrado');
+                }
+              } catch (historyErr) {
+                console.warn('⚠️ [Background] Erro ao registrar histórico (não crítico):', historyErr.message);
+              }
+              
+              console.log(`✅ [Background] ===== IMPORTAÇÃO SUPABASE CONCLUÍDA =====`);
+              console.log(`✅ [Background] ${importedRows} CTOs importadas com sucesso no Supabase!`);
             } else {
-              console.warn('⚠️ [Background] Excel está vazio ou não contém dados');
+              console.warn('⚠️ [Background] Nenhuma CTO válida encontrada para importar');
+              console.warn(`⚠️ [Background] Total de linhas: ${totalRows}, Válidas: ${totalValid}, Inválidas: ${totalInvalid}`);
             }
           } catch (supabaseErr) {
             console.error('❌ [Background] ===== ERRO NA IMPORTAÇÃO SUPABASE =====');
