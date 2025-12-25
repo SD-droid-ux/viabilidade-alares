@@ -396,10 +396,94 @@ if (fs.existsSync(OLD_BASE) && !fs.existsSync(BASE_CTOS_FILE)) {
   }
 })();
 
-// Rota para servir o arquivo base.xlsx (sempre usa base_atual mais recente)
-// IMPORTANTE: Esta rota NUNCA serve backups - apenas arquivos base_atual_*.xlsx
-app.get('/api/base.xlsx', (req, res) => {
+// Função para ler CTOs do Supabase e converter para Excel (nova versão)
+async function readCTOsFromSupabase() {
   try {
+    if (!supabase || !isSupabaseAvailable()) {
+      return null; // Retorna null para indicar que deve usar fallback
+    }
+    
+    console.log('📂 [Supabase] Carregando CTOs do Supabase...');
+    
+    const { data, error } = await supabase
+      .from('ctos')
+      .select('*')
+      .order('created_at', { ascending: false });
+    
+    if (error) {
+      console.error('❌ [Supabase] Erro ao ler CTOs:', error);
+      return null; // Fallback para Excel
+    }
+    
+    if (!data || data.length === 0) {
+      console.log('⚠️ [Supabase] Nenhuma CTO encontrada no Supabase');
+      return null; // Fallback para Excel
+    }
+    
+    // Converter para formato Excel (mesma estrutura do arquivo)
+    const excelData = (data || []).map(row => ({
+      cid_rede: row.cid_rede || '',
+      estado: row.estado || '',
+      pop: row.pop || '',
+      olt: row.olt || '',
+      slot: row.slot || '',
+      pon: row.pon || '',
+      id_cto: row.id_cto || '',
+      cto: row.cto || '',
+      latitude: row.latitude || '',
+      longitude: row.longitude || '',
+      status_cto: row.status_cto || '',
+      data_cadastro: row.data_cadastro || '',
+      portas: row.portas || '',
+      ocupado: row.ocupado || '',
+      livre: row.livre || '',
+      pct_ocup: row.pct_ocup || ''
+    }));
+    
+    console.log(`✅ [Supabase] ${excelData.length} CTOs carregadas do Supabase`);
+    
+    return excelData;
+  } catch (err) {
+    console.error('❌ [Supabase] Erro ao ler CTOs:', err);
+    return null; // Fallback para Excel
+  }
+}
+
+// Rota para servir o arquivo base.xlsx (tenta Supabase primeiro, fallback para Excel)
+// IMPORTANTE: Esta rota NUNCA serve backups - apenas arquivos base_atual_*.xlsx
+app.get('/api/base.xlsx', async (req, res) => {
+  try {
+    // Tentar ler do Supabase primeiro
+    const supabaseData = await readCTOsFromSupabase();
+    if (supabaseData !== null) {
+      try {
+        console.log('📤 [Supabase] Convertendo CTOs do Supabase para Excel...');
+        
+        // Criar workbook Excel em memória
+        const worksheet = XLSX.utils.json_to_sheet(supabaseData);
+        const workbook = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(workbook, worksheet, 'CTOs');
+        
+        // Gerar buffer Excel
+        const excelBuffer = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
+        
+        console.log(`✅ [Supabase] Excel gerado: ${supabaseData.length} CTOs`);
+        
+        // Configurar headers para download
+        res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        res.setHeader('Content-Disposition', 'attachment; filename="base.xlsx"');
+        res.setHeader('Content-Length', excelBuffer.length);
+        
+        // Enviar buffer
+        res.send(excelBuffer);
+        return;
+      } catch (excelErr) {
+        console.error('❌ [Supabase] Erro ao gerar Excel do Supabase, usando fallback:', excelErr);
+        // Continuar com fallback Excel
+      }
+    }
+    
+    // Fallback: servir arquivo Excel do disco
     const currentBasePath = getCurrentBaseFilePathSync();
     if (!currentBasePath || !fs.existsSync(currentBasePath)) {
       return res.status(404).json({ error: 'Arquivo base de dados não encontrado. Carregue uma base de dados em Configurações.' });
@@ -412,7 +496,7 @@ app.get('/api/base.xlsx', (req, res) => {
       return res.status(500).json({ error: 'Erro interno: arquivo de backup detectado' });
     }
     
-    console.log(`📤 [Base] Servindo arquivo: ${fileName}`);
+    console.log(`📤 [Excel] Servindo arquivo: ${fileName}`);
     res.sendFile(path.resolve(currentBasePath));
   } catch (err) {
     console.error('❌ [Base] Erro ao servir base.xlsx:', err);
@@ -653,8 +737,41 @@ async function saveProjetistas(projetistas) {
   await saveProjetistasToExcel(projetistas);
 }
 
-// Função para ler tabulações do Excel
-async function readTabulacoes() {
+// Função para ler tabulações do Supabase (nova versão)
+async function readTabulacoesFromSupabase() {
+  try {
+    if (!supabase || !isSupabaseAvailable()) {
+      return null; // Retorna null para indicar que deve usar fallback
+    }
+    
+    console.log('📂 [Supabase] Carregando tabulações do Supabase...');
+    
+    const { data, error } = await supabase
+      .from('tabulacoes')
+      .select('nome')
+      .order('nome', { ascending: true });
+    
+    if (error) {
+      console.error('❌ [Supabase] Erro ao ler tabulações:', error);
+      return null; // Fallback para Excel
+    }
+    
+    const tabulacoes = (data || []).map(t => (t.nome || '').trim()).filter(nome => nome);
+    
+    console.log(`✅ [Supabase] ${tabulacoes.length} tabulações carregadas do Supabase`);
+    if (tabulacoes.length > 0) {
+      console.log(`📋 [Supabase] Tabulações: ${tabulacoes.join(', ')}`);
+    }
+    
+    return tabulacoes;
+  } catch (err) {
+    console.error('❌ [Supabase] Erro ao ler tabulações:', err);
+    return null; // Fallback para Excel
+  }
+}
+
+// Função para ler tabulações do Excel (fallback)
+async function readTabulacoesFromExcel() {
   try {
     if (!fs.existsSync(TABULACOES_FILE)) {
       // Valores padrão se o arquivo não existir
@@ -665,18 +782,18 @@ async function readTabulacoes() {
         'Aprovado - Endereço não Localizado',
         'Fora da Área de Cobertura'
       ];
-      await saveTabulacoes(defaultTabulacoes);
+      await saveTabulacoesToExcel(defaultTabulacoes);
       return defaultTabulacoes;
     }
     
-    console.log(`📂 Carregando tabulações de: ${TABULACOES_FILE}`);
+    console.log(`📂 [Excel] Carregando tabulações de: ${TABULACOES_FILE}`);
     
     const workbook = XLSX.readFile(TABULACOES_FILE);
     const sheetName = workbook.SheetNames[0];
     const worksheet = workbook.Sheets[sheetName];
     const data = XLSX.utils.sheet_to_json(worksheet);
     
-    console.log(`📊 Colunas encontradas no Excel: ${Object.keys(data[0] || {})}`);
+    console.log(`📊 [Excel] Colunas encontradas no Excel: ${Object.keys(data[0] || {})}`);
     
     const nomeCol = data.length > 0 ? Object.keys(data[0]).find(col => col.toLowerCase().trim() === 'nome') : 'nome';
     
@@ -685,14 +802,14 @@ async function readTabulacoes() {
       .filter(nome => nome && nome.trim() !== '')
       .map(nome => nome.trim());
     
-    console.log(`✅ ${tabulacoes.length} tabulações carregadas da base de dados`);
+    console.log(`✅ [Excel] ${tabulacoes.length} tabulações carregadas do Excel`);
     if (tabulacoes.length > 0) {
-      console.log(`📋 Tabulações: ${tabulacoes.join(', ')}`);
+      console.log(`📋 [Excel] Tabulações: ${tabulacoes.join(', ')}`);
     }
     
     return tabulacoes;
   } catch (err) {
-    console.error('❌ Erro ao ler tabulações:', err);
+    console.error('❌ [Excel] Erro ao ler tabulações:', err);
     // Retornar valores padrão em caso de erro
     return [
       'Aprovado Com Portas',
@@ -704,9 +821,72 @@ async function readTabulacoes() {
   }
 }
 
-// Função para salvar tabulações no Excel
-// Função para salvar tabulações no Excel (com lock para prevenir perda de dados)
-async function saveTabulacoes(tabulacoes) {
+// Função para ler tabulações (tenta Supabase primeiro, fallback para Excel)
+async function readTabulacoes() {
+  // Tentar Supabase primeiro
+  const supabaseData = await readTabulacoesFromSupabase();
+  if (supabaseData !== null) {
+    return supabaseData;
+  }
+  
+  // Fallback para Excel
+  return await readTabulacoesFromExcel();
+}
+
+// Função para salvar tabulações no Supabase (nova versão)
+async function saveTabulacoesToSupabase(tabulacoes) {
+  try {
+    if (!supabase || !isSupabaseAvailable()) {
+      return false; // Indica que deve usar fallback
+    }
+    
+    console.log('💾 [Supabase] Salvando tabulações no Supabase...');
+    
+    // Normalizar dados
+    const dataToSave = tabulacoes
+      .map(nome => (nome || '').trim())
+      .filter(nome => nome) // Remover vazios
+      .map(nome => ({ nome }));
+    
+    // Deletar todas as tabulações existentes e inserir as novas
+    // (Isso garante sincronização completa)
+    const { error: deleteError } = await supabase
+      .from('tabulacoes')
+      .delete()
+      .neq('id', 0); // Deletar todos (condição sempre verdadeira)
+    
+    if (deleteError) {
+      console.error('❌ [Supabase] Erro ao limpar tabulações:', deleteError);
+      return false;
+    }
+    
+    // Inserir todas as tabulações
+    if (dataToSave.length > 0) {
+      const { error: insertError } = await supabase
+        .from('tabulacoes')
+        .insert(dataToSave);
+      
+      if (insertError) {
+        console.error('❌ [Supabase] Erro ao inserir tabulações:', insertError);
+        return false;
+      }
+    }
+    
+    console.log(`✅ [Supabase] ${dataToSave.length} tabulações salvas no Supabase`);
+    if (dataToSave.length > 0) {
+      const nomes = dataToSave.map(t => t.nome).join(', ');
+      console.log(`📋 [Supabase] Tabulações: ${nomes}`);
+    }
+    
+    return true; // Sucesso
+  } catch (err) {
+    console.error('❌ [Supabase] Erro ao salvar tabulações:', err);
+    return false; // Fallback para Excel
+  }
+}
+
+// Função para salvar tabulações no Excel (fallback)
+async function saveTabulacoesToExcel(tabulacoes) {
   return await withLock('tabulacoes', async () => {
     try {
       // Criar dados para o Excel
@@ -719,16 +899,29 @@ async function saveTabulacoes(tabulacoes) {
       
       // Salvar arquivo (atualiza a base de dados)
       XLSX.writeFile(workbook, TABULACOES_FILE);
-      console.log(`✅ Base de dados atualizada! Tabulações salvas no Excel: ${tabulacoes.length} tabulações`);
-      console.log(`📁 Arquivo: ${TABULACOES_FILE}`);
+      console.log(`✅ [Excel] Base de dados atualizada! Tabulações salvas no Excel: ${tabulacoes.length} tabulações`);
+      console.log(`📁 [Excel] Arquivo: ${TABULACOES_FILE}`);
       if (tabulacoes.length > 0) {
-        console.log(`📋 Tabulações na base: ${tabulacoes.join(', ')}`);
+        console.log(`📋 [Excel] Tabulações na base: ${tabulacoes.join(', ')}`);
       }
     } catch (err) {
-      console.error('❌ Erro ao salvar tabulações:', err);
+      console.error('❌ [Excel] Erro ao salvar tabulações:', err);
       throw err;
     }
   });
+}
+
+// Função para salvar tabulações (tenta Supabase primeiro, fallback para Excel)
+async function saveTabulacoes(tabulacoes) {
+  // Tentar Supabase primeiro
+  const saved = await saveTabulacoesToSupabase(tabulacoes);
+  if (saved) {
+    return; // Sucesso no Supabase
+  }
+  
+  // Fallback para Excel
+  console.log('⚠️ [Save] Usando fallback Excel para salvar tabulações');
+  await saveTabulacoesToExcel(tabulacoes);
 }
 
 // Função para formatar data para DD/MM/YYYY
@@ -793,8 +986,55 @@ async function ensureVIALABase() {
   });
 }
 
+// Função para ler VI ALAs do Supabase (nova versão)
+async function readVIALABaseFromSupabase() {
+  try {
+    if (!supabase || !isSupabaseAvailable()) {
+      return null; // Retorna null para indicar que deve usar fallback
+    }
+    
+    console.log('📂 [Supabase] Carregando VI ALAs do Supabase...');
+    
+    const { data, error } = await supabase
+      .from('vi_ala')
+      .select('vi_ala, ala, data, projetista, cidade, endereco, latitude, longitude')
+      .order('created_at', { ascending: false });
+    
+    if (error) {
+      console.error('❌ [Supabase] Erro ao ler VI ALAs:', error);
+      return null; // Fallback para Excel
+    }
+    
+    // Converter para formato compatível com Excel (mesma estrutura)
+    const records = (data || []).map(row => ({
+      'VI ALA': row.vi_ala || '',
+      'ALA': row.ala || '',
+      'DATA': row.data || '',
+      'PROJETISTA': row.projetista || '',
+      'CIDADE': row.cidade || '',
+      'ENDEREÇO': row.endereco || '',
+      'LATITUDE': row.latitude || '',
+      'LONGITUDE': row.longitude || ''
+    }));
+    
+    console.log(`✅ [Supabase] ${records.length} VI ALAs carregados do Supabase`);
+    
+    return records;
+  } catch (err) {
+    console.error('❌ [Supabase] Erro ao ler VI ALAs:', err);
+    return null; // Fallback para Excel
+  }
+}
+
 // Função interna para ler base_VI_ALA.xlsx (sem lock, para uso interno)
 async function _readVIALABaseInternal() {
+  // Tentar Supabase primeiro
+  const supabaseData = await readVIALABaseFromSupabase();
+  if (supabaseData !== null) {
+    return supabaseData;
+  }
+  
+  // Fallback para Excel
   try {
     if (!fs.existsSync(BASE_VI_ALA_FILE)) {
       await _ensureVIALABaseInternal();
@@ -810,7 +1050,7 @@ async function _readVIALABaseInternal() {
     
     return data || [];
   } catch (err) {
-    console.error('❌ Erro ao ler base VI ALA:', err);
+    console.error('❌ [Excel] Erro ao ler base VI ALA:', err);
     throw err;
   }
 }
@@ -822,35 +1062,103 @@ async function readVIALABase() {
   });
 }
 
-// Função para obter o próximo VI ALA (versão simplificada e rápida, sem lock para evitar travamento)
-async function getNextVIALA() {
+// Função para obter o próximo VI ALA do Supabase (nova versão)
+async function getNextVIALAFromSupabase() {
+  try {
+    if (!supabase || !isSupabaseAvailable()) {
+      return null; // Retorna null para indicar que deve usar fallback
+    }
+    
+    console.log('🔍 [Supabase] Obtendo próximo VI ALA do Supabase...');
+    
+    // Tentar usar a função SQL primeiro (mais eficiente)
+    try {
+      const { data, error } = await supabase.rpc('get_next_vi_ala_number');
+      
+      if (error) {
+        // Se a função não existir, buscar manualmente
+        throw error;
+      }
+      
+      // data pode ser 0 (primeiro número), então verificar explicitamente
+      const nextNumber = (data !== null && data !== undefined) ? data : 1;
+      const nextVIALA = `VI ALA-${String(nextNumber).padStart(7, '0')}`;
+      
+      console.log(`✅ [Supabase] Próximo VI ALA gerado: ${nextVIALA} (número: ${nextNumber})`);
+      return nextVIALA;
+    } catch (rpcError) {
+      // Fallback: buscar manualmente o máximo
+      console.log('⚠️ [Supabase] Função SQL não disponível, buscando manualmente...');
+      
+      const { data, error } = await supabase
+        .from('vi_ala')
+        .select('vi_ala')
+        .order('created_at', { ascending: false })
+        .limit(100); // Limitar para performance
+      
+      if (error) {
+        console.error('❌ [Supabase] Erro ao buscar VI ALAs:', error);
+        return null;
+      }
+      
+      // Encontrar maior número
+      let maxNumber = 0;
+      if (data && data.length > 0) {
+        for (const row of data) {
+          const viAla = row.vi_ala || '';
+          if (viAla && typeof viAla === 'string') {
+            const match = viAla.match(/VI\s*ALA[-\s]*(\d+)/i);
+            if (match) {
+              const number = parseInt(match[1], 10);
+              if (!isNaN(number) && number > maxNumber) {
+                maxNumber = number;
+              }
+            }
+          }
+        }
+      }
+      
+      const nextNumber = maxNumber + 1;
+      const nextVIALA = `VI ALA-${String(nextNumber).padStart(7, '0')}`;
+      
+      console.log(`✅ [Supabase] Próximo VI ALA gerado: ${nextVIALA} (max: ${maxNumber}, próximo: ${nextNumber})`);
+      return nextVIALA;
+    }
+  } catch (err) {
+    console.error('❌ [Supabase] Erro ao obter próximo VI ALA:', err);
+    return null; // Fallback para Excel
+  }
+}
+
+// Função para obter o próximo VI ALA do Excel (fallback)
+async function getNextVIALAFromExcel() {
   const startTime = Date.now();
   try {
-    console.log('🔍 [VI ALA] Iniciando obtenção do próximo VI ALA...');
+    console.log('🔍 [Excel] Obtendo próximo VI ALA do Excel...');
     
     // Verificar/criar base (rápido, sem lock para evitar travamento)
     try {
       await fsPromises.access(BASE_VI_ALA_FILE);
-      console.log('✅ [VI ALA] Arquivo existe');
+      console.log('✅ [Excel] Arquivo existe');
     } catch {
-      console.log('📝 [VI ALA] Arquivo não existe, criando...');
+      console.log('📝 [Excel] Arquivo não existe, criando...');
       const headers = ['VI ALA', 'ALA', 'DATA', 'PROJETISTA', 'CIDADE', 'ENDEREÇO', 'LATITUDE', 'LONGITUDE'];
       const worksheet = XLSX.utils.aoa_to_sheet([headers]);
       const workbook = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(workbook, worksheet, 'VI ALA');
       XLSX.writeFile(workbook, BASE_VI_ALA_FILE);
-      console.log('✅ [VI ALA] Arquivo criado');
+      console.log('✅ [Excel] Arquivo criado');
     }
     
     // Ler dados (rápido)
-    console.log('📖 [VI ALA] Lendo dados...');
+    console.log('📖 [Excel] Lendo dados...');
     const fileBuffer = await fsPromises.readFile(BASE_VI_ALA_FILE);
     const workbook = XLSX.read(fileBuffer, { type: 'buffer' });
     const sheetName = workbook.SheetNames[0];
     const worksheet = workbook.Sheets[sheetName];
     const data = XLSX.utils.sheet_to_json(worksheet) || [];
     
-    console.log(`📊 [VI ALA] Total de registros: ${data.length}`);
+    console.log(`📊 [Excel] Total de registros: ${data.length}`);
     
     // Encontrar maior número
     let maxNumber = 0;
@@ -874,18 +1182,74 @@ async function getNextVIALA() {
     const nextVIALA = `VI ALA-${String(nextNumber).padStart(7, '0')}`;
     
     const elapsed = Date.now() - startTime;
-    console.log(`✅ [VI ALA] Próximo gerado: ${nextVIALA} (max: ${maxNumber}, próximo: ${nextNumber}) em ${elapsed}ms`);
+    console.log(`✅ [Excel] Próximo gerado: ${nextVIALA} (max: ${maxNumber}, próximo: ${nextNumber}) em ${elapsed}ms`);
     
     return nextVIALA;
   } catch (err) {
     const elapsed = Date.now() - startTime;
-    console.error(`❌ [VI ALA] Erro após ${elapsed}ms:`, err);
+    console.error(`❌ [Excel] Erro após ${elapsed}ms:`, err);
     throw err;
   }
 }
 
-// Função para salvar registro na base_VI_ALA.xlsx
-async function saveVIALARecord(record) {
+// Função para obter o próximo VI ALA (tenta Supabase primeiro, fallback para Excel)
+async function getNextVIALA() {
+  // Tentar Supabase primeiro
+  const supabaseResult = await getNextVIALAFromSupabase();
+  if (supabaseResult !== null) {
+    return supabaseResult;
+  }
+  
+  // Fallback para Excel
+  return await getNextVIALAFromExcel();
+}
+
+// Função para salvar registro VI ALA no Supabase (nova versão)
+async function saveVIALARecordToSupabase(record) {
+  try {
+    if (!supabase || !isSupabaseAvailable()) {
+      return false; // Indica que deve usar fallback
+    }
+    
+    console.log('💾 [Supabase] Salvando registro VI ALA no Supabase...');
+    
+    // Converter formato Excel para formato Supabase
+    const dataToSave = {
+      vi_ala: record['VI ALA'] || '',
+      ala: record['ALA'] || null,
+      data: record['DATA'] || null,
+      projetista: record['PROJETISTA'] || null,
+      cidade: record['CIDADE'] || null,
+      endereco: record['ENDEREÇO'] || null,
+      latitude: record['LATITUDE'] ? parseFloat(record['LATITUDE']) : null,
+      longitude: record['LONGITUDE'] ? parseFloat(record['LONGITUDE']) : null
+    };
+    
+    // Validar campos obrigatórios
+    if (!dataToSave.vi_ala) {
+      throw new Error('VI ALA é obrigatório');
+    }
+    
+    // Inserir no Supabase
+    const { error } = await supabase
+      .from('vi_ala')
+      .insert([dataToSave]);
+    
+    if (error) {
+      console.error('❌ [Supabase] Erro ao inserir VI ALA:', error);
+      return false;
+    }
+    
+    console.log(`✅ [Supabase] Registro VI ALA salvo: ${dataToSave.vi_ala}`);
+    return true; // Sucesso
+  } catch (err) {
+    console.error('❌ [Supabase] Erro ao salvar registro VI ALA:', err);
+    return false; // Fallback para Excel
+  }
+}
+
+// Função para salvar registro na base_VI_ALA.xlsx (fallback)
+async function saveVIALARecordToExcel(record) {
   return await withLock('vi_ala', async () => {
     try {
       await _ensureVIALABaseInternal();
@@ -901,14 +1265,27 @@ async function saveVIALARecord(record) {
       
       // Salvar arquivo
       XLSX.writeFile(workbook, BASE_VI_ALA_FILE);
-      console.log('✅ Registro VI ALA salvo com sucesso:', record['VI ALA']);
+      console.log('✅ [Excel] Registro VI ALA salvo:', record['VI ALA']);
       
       return true;
     } catch (err) {
-      console.error('❌ Erro ao salvar registro VI ALA:', err);
+      console.error('❌ [Excel] Erro ao salvar registro VI ALA:', err);
       throw err;
     }
   });
+}
+
+// Função para salvar registro VI ALA (tenta Supabase primeiro, fallback para Excel)
+async function saveVIALARecord(record) {
+  // Tentar Supabase primeiro
+  const saved = await saveVIALARecordToSupabase(record);
+  if (saved) {
+    return; // Sucesso no Supabase
+  }
+  
+  // Fallback para Excel
+  console.log('⚠️ [Save] Usando fallback Excel para salvar VI ALA');
+  await saveVIALARecordToExcel(record);
 }
 
 // Rota para listar projetistas
@@ -1766,6 +2143,164 @@ app.post('/api/upload-base', (req, res, next) => {
         const now = new Date();
         const dateStr = formatDateForFilename(now);
         
+        // Tentar importar para Supabase ANTES de salvar arquivo Excel
+        let supabaseImported = false;
+        let importedRows = 0;
+        if (supabase && isSupabaseAvailable()) {
+          try {
+            console.log('📤 [Background] Lendo dados do Excel para importar no Supabase...');
+            
+            // Ler dados do arquivo Excel
+            const workbook = XLSX.readFile(tempFilePath);
+            const sheetName = workbook.SheetNames[0];
+            const worksheet = workbook.Sheets[sheetName];
+            const excelData = XLSX.utils.sheet_to_json(worksheet);
+            
+            if (excelData && excelData.length > 0) {
+              console.log(`📊 [Background] ${excelData.length} linhas lidas do Excel`);
+              
+              // Converter para formato Supabase
+              const ctosToImport = excelData
+                .map(row => {
+                  // Normalizar nomes de colunas (case insensitive)
+                  const normalizeKey = (key) => {
+                    const lower = String(key || '').toLowerCase().trim();
+                    const mapping = {
+                      'cid_rede': 'cid_rede',
+                      'cid rede': 'cid_rede',
+                      'estado': 'estado',
+                      'pop': 'pop',
+                      'olt': 'olt',
+                      'slot': 'slot',
+                      'pon': 'pon',
+                      'id_cto': 'id_cto',
+                      'id cto': 'id_cto',
+                      'cto': 'cto',
+                      'latitude': 'latitude',
+                      'lat': 'latitude',
+                      'longitude': 'longitude',
+                      'long': 'longitude',
+                      'lng': 'longitude',
+                      'status_cto': 'status_cto',
+                      'status cto': 'status_cto',
+                      'data_cadastro': 'data_cadastro',
+                      'data cadastro': 'data_cadastro',
+                      'portas': 'portas',
+                      'ocupado': 'ocupado',
+                      'livre': 'livre',
+                      'pct_ocup': 'pct_ocup',
+                      'pct ocup': 'pct_ocup'
+                    };
+                    return mapping[lower] || lower;
+                  };
+                  
+                  const normalizedRow = {};
+                  for (const key in row) {
+                    const normalizedKey = normalizeKey(key);
+                    normalizedRow[normalizedKey] = row[key];
+                  }
+                  
+                  // Converter valores
+                  const cto = {
+                    cid_rede: normalizedRow.cid_rede || null,
+                    estado: normalizedRow.estado || null,
+                    pop: normalizedRow.pop || null,
+                    olt: normalizedRow.olt || null,
+                    slot: normalizedRow.slot || null,
+                    pon: normalizedRow.pon || null,
+                    id_cto: normalizedRow.id_cto || null,
+                    cto: normalizedRow.cto || null,
+                    latitude: normalizedRow.latitude ? parseFloat(normalizedRow.latitude) : null,
+                    longitude: normalizedRow.longitude ? parseFloat(normalizedRow.longitude) : null,
+                    status_cto: normalizedRow.status_cto || null,
+                    data_cadastro: normalizedRow.data_cadastro || null,
+                    portas: normalizedRow.portas ? parseInt(normalizedRow.portas) : null,
+                    ocupado: normalizedRow.ocupado ? parseInt(normalizedRow.ocupado) : null,
+                    livre: normalizedRow.livre ? parseInt(normalizedRow.livre) : null,
+                    pct_ocup: normalizedRow.pct_ocup ? parseFloat(normalizedRow.pct_ocup) : null
+                  };
+                  
+                  // Filtrar apenas linhas com coordenadas válidas (essenciais)
+                  if (cto.latitude && cto.longitude && 
+                      !isNaN(cto.latitude) && !isNaN(cto.longitude) &&
+                      cto.latitude >= -90 && cto.latitude <= 90 &&
+                      cto.longitude >= -180 && cto.longitude <= 180) {
+                    return cto;
+                  }
+                  return null;
+                })
+                .filter(cto => cto !== null); // Remover inválidos
+              
+              console.log(`📊 [Background] ${ctosToImport.length} CTOs válidas para importar (com coordenadas)`);
+              
+              if (ctosToImport.length > 0) {
+                // Deletar todas as CTOs existentes antes de importar (substituição completa)
+                console.log('🗑️ [Background] Limpando CTOs antigas do Supabase...');
+                const { error: deleteError } = await supabase
+                  .from('ctos')
+                  .delete()
+                  .neq('id', 0); // Deletar todos
+                
+                if (deleteError) {
+                  console.error('❌ [Background] Erro ao limpar CTOs antigas:', deleteError);
+                  throw deleteError;
+                }
+                
+                // Importar em lotes de 1000 para melhor performance
+                const BATCH_SIZE = 1000;
+                let imported = 0;
+                
+                for (let i = 0; i < ctosToImport.length; i += BATCH_SIZE) {
+                  const batch = ctosToImport.slice(i, i + BATCH_SIZE);
+                  const { error: insertError } = await supabase
+                    .from('ctos')
+                    .insert(batch);
+                  
+                  if (insertError) {
+                    console.error(`❌ [Background] Erro ao importar lote ${Math.floor(i / BATCH_SIZE) + 1}:`, insertError);
+                    throw insertError;
+                  }
+                  
+                  imported += batch.length;
+                  console.log(`✅ [Background] Lote ${Math.floor(i / BATCH_SIZE) + 1} importado: ${imported}/${ctosToImport.length} CTOs`);
+                }
+                
+                importedRows = imported;
+                supabaseImported = true;
+                
+                // Registrar no histórico de uploads
+                try {
+                  const { error: historyError } = await supabase
+                    .from('upload_history')
+                    .insert([{
+                      file_name: fileName,
+                      file_size_bytes: fileSize,
+                      total_rows: excelData.length,
+                      valid_rows: importedRows,
+                      uploaded_by: req.body?.usuario || 'Sistema'
+                    }]);
+                  
+                  if (historyError) {
+                    console.warn('⚠️ [Background] Erro ao registrar histórico (não crítico):', historyError);
+                  } else {
+                    console.log('✅ [Background] Histórico de upload registrado');
+                  }
+                } catch (historyErr) {
+                  console.warn('⚠️ [Background] Erro ao registrar histórico (não crítico):', historyErr.message);
+                }
+                
+                console.log(`✅ [Background] ${importedRows} CTOs importadas com sucesso no Supabase!`);
+              } else {
+                console.warn('⚠️ [Background] Nenhuma CTO válida encontrada para importar');
+              }
+            }
+          } catch (supabaseErr) {
+            console.error('❌ [Background] Erro ao importar para Supabase, continuando com Excel:', supabaseErr);
+            console.error('❌ [Background] Stack:', supabaseErr.stack);
+            // Continuar com salvamento Excel (não quebrar o fluxo)
+          }
+        }
+        
         // Processar operações de arquivo de forma sequencial e segura
         console.log('📂 [Background] Procurando arquivos existentes...');
         
@@ -1891,6 +2426,11 @@ app.post('/api/upload-base', (req, res, next) => {
         
         console.log(`✅ [Background] Nova base de dados salva com sucesso: ${newBaseFileName}`);
         console.log(`✅ [Background] Processamento concluído: ${validation.validRows} linhas válidas de ${validation.totalRows} total`);
+        if (supabaseImported) {
+          console.log(`✅ [Background] ${importedRows} CTOs importadas no Supabase`);
+        } else {
+          console.log(`⚠️ [Background] Importação Supabase não realizada (usando apenas Excel)`);
+        }
         console.log(`✅ [Background] Base antiga substituída - sistema agora usa: ${newBaseFileName}`);
       } catch (err) {
         console.error('❌ [Background] Erro ao processar arquivo em background:', err);
@@ -1951,6 +2491,44 @@ app.post('/api/tabulacoes', async (req, res) => {
     }
     
     const nomeLimpo = nome.trim();
+    
+    // Tentar adicionar no Supabase primeiro
+    if (supabase && isSupabaseAvailable()) {
+      try {
+        // Verificar se já existe
+        const { data: existing } = await supabase
+          .from('tabulacoes')
+          .select('nome')
+          .ilike('nome', nomeLimpo)
+          .limit(1);
+        
+        if (existing && existing.length > 0) {
+          const tabulacoes = await readTabulacoes();
+          return res.json({ success: true, tabulacoes, message: 'Tabulação já existe' });
+        }
+        
+        // Inserir no Supabase
+        const { error } = await supabase
+          .from('tabulacoes')
+          .insert([{ nome: nomeLimpo }]);
+        
+        if (error) {
+          throw error;
+        }
+        
+        console.log(`✅ [Supabase] Tabulação '${nomeLimpo}' adicionada no Supabase`);
+        
+        // Buscar todas para retornar
+        const tabulacoes = await readTabulacoes();
+        
+        return res.json({ success: true, tabulacoes, message: 'Tabulação adicionada com sucesso' });
+      } catch (supabaseErr) {
+        console.error('❌ [Supabase] Erro ao adicionar tabulação, usando fallback Excel:', supabaseErr);
+        // Continuar com fallback Excel
+      }
+    }
+    
+    // Fallback: usar Excel
     let tabulacoes = await readTabulacoes();
     
     // Verificar se já existe
@@ -1962,7 +2540,7 @@ app.post('/api/tabulacoes', async (req, res) => {
     tabulacoes.push(nomeLimpo);
     tabulacoes.sort(); // Ordenar alfabeticamente
     
-    // Salvar no Excel
+    // Salvar
     await saveTabulacoes(tabulacoes);
     
     res.json({ success: true, tabulacoes, message: 'Tabulação adicionada com sucesso' });
@@ -1980,8 +2558,46 @@ app.delete('/api/tabulacoes/:nome', async (req, res) => {
       return res.status(400).json({ success: false, error: 'Nome da tabulação é obrigatório' });
     }
     
-    let tabulacoes = await readTabulacoes();
     const nomeLimpo = nome.trim();
+    
+    // Tentar deletar no Supabase primeiro
+    if (supabase && isSupabaseAvailable()) {
+      try {
+        // Buscar tabulação para verificar se existe
+        const { data: existing } = await supabase
+          .from('tabulacoes')
+          .select('nome')
+          .ilike('nome', nomeLimpo)
+          .limit(1);
+        
+        if (!existing || existing.length === 0) {
+          return res.status(404).json({ success: false, error: 'Tabulação não encontrada' });
+        }
+        
+        // Deletar do Supabase
+        const { error } = await supabase
+          .from('tabulacoes')
+          .delete()
+          .ilike('nome', nomeLimpo);
+        
+        if (error) {
+          throw error;
+        }
+        
+        console.log(`✅ [Supabase] Tabulação '${nomeLimpo}' deletada do Supabase`);
+        
+        // Buscar todas para retornar
+        const tabulacoes = await readTabulacoes();
+        
+        return res.json({ success: true, tabulacoes, message: 'Tabulação deletada com sucesso' });
+      } catch (supabaseErr) {
+        console.error('❌ [Supabase] Erro ao deletar tabulação, usando fallback Excel:', supabaseErr);
+        // Continuar com fallback Excel
+      }
+    }
+    
+    // Fallback: usar Excel
+    let tabulacoes = await readTabulacoes();
     
     // Verificar se existe
     const index = tabulacoes.indexOf(nomeLimpo);
@@ -1992,7 +2608,7 @@ app.delete('/api/tabulacoes/:nome', async (req, res) => {
     // Remover tabulação
     tabulacoes.splice(index, 1);
     
-    // Salvar no Excel
+    // Salvar
     await saveTabulacoes(tabulacoes);
     
     res.json({ success: true, tabulacoes, message: 'Tabulação deletada com sucesso' });
