@@ -274,6 +274,10 @@ const activeSessions = {};
 const logoutHistory = {};
 const SESSION_TIMEOUT = 5 * 60 * 1000; // 5 minutos de inatividade = offline
 
+// Flag para controlar upload em andamento (pausa requisições de verificação de usuários)
+let uploadInProgress = false;
+let uploadPromise = null; // Promise que resolve quando upload termina
+
 // Sistema de locks para operações críticas (prevenir race conditions)
 const fileLocks = {
   projetistas: null,
@@ -2203,6 +2207,14 @@ app.post('/api/upload-base', (req, res, next) => {
     console.log(`💾 [Upload] Arquivo salvo temporariamente em: ${tempFilePath} (${fileSize} bytes)`);
     
     // Processar validação e salvamento em background (não bloqueia resposta)
+    // Criar promise para controlar quando upload termina
+    let resolveUpload;
+    uploadPromise = new Promise((resolve) => {
+      resolveUpload = resolve;
+    });
+    uploadInProgress = true;
+    console.log('⏸️ [Upload] Flag de upload ativada - requisições /api/users/online serão pausadas');
+    
     (async () => {
       let tempFileDeleted = false;
       try {
@@ -2618,6 +2630,14 @@ app.post('/api/upload-base', (req, res, next) => {
           }
         }
         // Não podemos retornar erro ao cliente (já respondemos), apenas logar
+      } finally {
+        // Sempre liberar flag e resolver promise quando upload terminar
+        uploadInProgress = false;
+        if (resolveUpload) {
+          resolveUpload();
+          console.log('✅ [Upload] Flag de upload desativada - requisições /api/users/online retomadas');
+        }
+        uploadPromise = null;
       }
     })();
   } catch (err) {
@@ -2812,7 +2832,7 @@ app.post('/api/auth/logout', (req, res) => {
 });
 
 // Rota para obter lista de usuários online com informações de timestamp
-app.get('/api/users/online', (req, res) => {
+app.get('/api/users/online', async (req, res) => {
   try {
     // Garantir headers CORS
     const origin = req.headers.origin;
@@ -2822,6 +2842,32 @@ app.get('/api/users/online', (req, res) => {
       res.setHeader('Access-Control-Allow-Origin', '*');
     }
     res.setHeader('Access-Control-Allow-Credentials', 'true');
+    
+    // Se upload estiver em andamento, aguardar até terminar (com timeout)
+    if (uploadInProgress && uploadPromise) {
+      console.log('⏸️ [Users/Online] Upload em andamento, aguardando conclusão...');
+      const MAX_WAIT_TIME = 5 * 60 * 1000; // 5 minutos máximo de espera
+      const startWait = Date.now();
+      
+      try {
+        // Aguardar upload terminar (com timeout)
+        await Promise.race([
+          uploadPromise,
+          new Promise((_, reject) => 
+            setTimeout(() => reject(new Error('Timeout aguardando upload')), MAX_WAIT_TIME)
+          )
+        ]);
+        console.log(`✅ [Users/Online] Upload concluído, processando requisição (aguardou ${Date.now() - startWait}ms)`);
+      } catch (waitErr) {
+        if (waitErr.message === 'Timeout aguardando upload') {
+          console.warn(`⚠️ [Users/Online] Timeout aguardando upload (${MAX_WAIT_TIME}ms), retornando dados atuais`);
+          // Continuar mesmo se timeout (retornar dados atuais)
+        } else {
+          console.warn(`⚠️ [Users/Online] Erro ao aguardar upload: ${waitErr.message}, retornando dados atuais`);
+          // Continuar mesmo se erro (retornar dados atuais)
+        }
+      }
+    }
     
     const now = Date.now();
     const onlineUsers = [];
