@@ -60,8 +60,16 @@ app.use(cors({
   credentials: true
 }));
 
-app.use(express.json({ limit: '100mb' }));
-app.use(express.urlencoded({ extended: true, limit: '100mb' }));
+// Configurar body parser com limites maiores e timeout maior
+app.use(express.json({ 
+  limit: '100mb',
+  parameterLimit: 50000
+}));
+app.use(express.urlencoded({ 
+  extended: true, 
+  limit: '100mb',
+  parameterLimit: 50000
+}));
 
 // Middleware para logar requisições (debug)
 app.use((req, res, next) => {
@@ -1182,9 +1190,10 @@ app.post('/api/upload-base', (req, res, next) => {
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
   
-  // Configurar timeout maior para uploads grandes (5 minutos)
-  req.setTimeout(5 * 60 * 1000);
-  res.setTimeout(5 * 60 * 1000);
+  // Configurar timeout maior para uploads grandes (2 minutos = 120 segundos)
+  // Railway tem timeout de gateway de ~30s, mas precisamos tempo para receber arquivo grande
+  req.setTimeout(2 * 60 * 1000); // 2 minutos para receber o arquivo
+  res.setTimeout(2 * 60 * 1000); // 2 minutos para enviar resposta
   
   upload.single('file')(req, res, (err) => {
     if (err) {
@@ -1262,47 +1271,7 @@ app.post('/api/upload-base', (req, res, next) => {
     console.log(`📤 Arquivo recebido: ${req.file.originalname} (${req.file.size} bytes)`);
     console.log(`📋 Tipo MIME: ${req.file.mimetype}`);
 
-    // Validar estrutura do arquivo de forma rápida e não bloqueante
-    let validation;
-    try {
-      console.log('🔍 Iniciando validação rápida do arquivo...');
-      validation = validateExcelStructure(req.file.buffer);
-      console.log(`📊 Resultado da validação:`, validation);
-    } catch (err) {
-      console.error('❌ Erro durante validação:', err);
-      // Garantir headers CORS na resposta de erro
-      if (origin) {
-        res.setHeader('Access-Control-Allow-Origin', origin);
-      } else {
-        res.setHeader('Access-Control-Allow-Origin', '*');
-      }
-      res.setHeader('Access-Control-Allow-Credentials', 'true');
-      
-      return res.status(400).json({
-        success: false,
-        error: `Erro ao validar arquivo: ${err.message}`
-      });
-    }
-    
-    if (!validation.valid) {
-      console.error(`❌ Validação falhou: ${validation.error}`);
-      // Garantir headers CORS na resposta de erro
-      if (origin) {
-        res.setHeader('Access-Control-Allow-Origin', origin);
-      } else {
-        res.setHeader('Access-Control-Allow-Origin', '*');
-      }
-      res.setHeader('Access-Control-Allow-Credentials', 'true');
-      
-      return res.status(400).json({
-        success: false,
-        error: validation.error
-      });
-    }
-
-    console.log(`✅ Validação bem-sucedida: ${validation.validRows} linhas válidas de ${validation.totalRows} total`);
-
-    // Garantir headers CORS na resposta de sucesso ANTES de processar
+    // Garantir headers CORS na resposta ANTES de qualquer processamento
     if (origin) {
       res.setHeader('Access-Control-Allow-Origin', origin);
     } else {
@@ -1310,28 +1279,38 @@ app.post('/api/upload-base', (req, res, next) => {
     }
     res.setHeader('Access-Control-Allow-Credentials', 'true');
     
-    // Responder IMEDIATAMENTE para evitar timeout
-    // Processar arquivo em background
+    // RESPONDER IMEDIATAMENTE para evitar timeout do Railway
+    // Validar e processar em background
     res.json({
       success: true,
-      message: `Upload recebido! Processando arquivo...\n${validation.validRows} linhas válidas de ${validation.totalRows} total`,
-      stats: {
-        totalRows: validation.totalRows,
-        validRows: validation.validRows,
-        invalidRows: validation.invalidRows
-      },
-      processing: true
+      message: `Upload recebido! Validando e processando arquivo em background...`,
+      processing: true,
+      fileSize: req.file.size,
+      fileName: req.file.originalname
     });
     
-    // Processar arquivo em background (não bloqueia a resposta)
+    // Processar validação e salvamento em background (não bloqueia resposta)
     (async () => {
       try {
+        console.log('🔍 [Background] Iniciando validação do arquivo...');
+        const validation = validateExcelStructure(req.file.buffer);
+        console.log(`📊 [Background] Resultado da validação:`, validation);
+        
+        if (!validation.valid) {
+          console.error(`❌ [Background] Validação falhou: ${validation.error}`);
+          // Log do erro, mas não podemos retornar ao cliente (já respondemos)
+          return;
+        }
+
+        console.log(`✅ [Background] Validação bem-sucedida: ${validation.validRows} linhas válidas de ${validation.totalRows} total`);
+        
         // Obter data atual para nomear arquivos
         const now = new Date();
         const dateStr = formatDateForFilename(now);
         
         // Processar operações de arquivo em paralelo e de forma assíncrona
         // Encontrar arquivos existentes (assíncrono)
+        console.log('📂 [Background] Procurando arquivos existentes...');
         const [currentBasePath, backupBasePath] = await Promise.all([
           findCurrentBaseFile(),
           findBackupBaseFile()
@@ -1344,9 +1323,9 @@ app.post('/api/upload-base', (req, res, next) => {
         if (currentBasePath && backupBasePath) {
           fileOperations.push(
             fsPromises.unlink(backupBasePath).then(() => {
-              console.log(`🗑️ Backup antigo removido: ${path.basename(backupBasePath)}`);
+              console.log(`🗑️ [Background] Backup antigo removido: ${path.basename(backupBasePath)}`);
             }).catch(err => {
-              console.error('Erro ao remover backup antigo:', err);
+              console.error('❌ [Background] Erro ao remover backup antigo:', err);
             })
           );
         }
@@ -1357,14 +1336,14 @@ app.post('/api/upload-base', (req, res, next) => {
           const newBackupPath = path.join(DATA_DIR, backupFileName);
           fileOperations.push(
             fsPromises.rename(currentBasePath, newBackupPath).then(() => {
-              console.log(`💾 Base atual movida para backup: ${backupFileName}`);
+              console.log(`💾 [Background] Base atual movida para backup: ${backupFileName}`);
             }).catch(err => {
-              console.error('Erro ao criar backup da base atual:', err);
+              console.error('❌ [Background] Erro ao criar backup da base atual:', err);
               // Tentar copiar ao invés de renomear
               return fsPromises.copyFile(currentBasePath, newBackupPath).then(() => {
-                console.log(`💾 Backup criado por cópia: ${backupFileName}`);
+                console.log(`💾 [Background] Backup criado por cópia: ${backupFileName}`);
               }).catch(copyErr => {
-                console.error('Erro ao copiar para backup:', copyErr);
+                console.error('❌ [Background] Erro ao copiar para backup:', copyErr);
               });
             })
           );
@@ -1374,15 +1353,20 @@ app.post('/api/upload-base', (req, res, next) => {
         const newBaseFileName = `base_atual_${dateStr}.xlsx`;
         const newBasePath = path.join(DATA_DIR, newBaseFileName);
         
+        console.log(`💾 [Background] Salvando arquivo: ${newBaseFileName} (${req.file.size} bytes)`);
+        
         // Executar todas as operações de arquivo em paralelo
         await Promise.all([
           ...fileOperations,
           fsPromises.writeFile(newBasePath, req.file.buffer)
         ]);
         
-        console.log(`✅ Base de dados salva como: ${newBaseFileName}`);
+        console.log(`✅ [Background] Base de dados salva com sucesso: ${newBaseFileName}`);
+        console.log(`✅ [Background] Processamento concluído: ${validation.validRows} linhas válidas de ${validation.totalRows} total`);
       } catch (err) {
-        console.error('❌ Erro ao processar arquivo em background:', err);
+        console.error('❌ [Background] Erro ao processar arquivo em background:', err);
+        console.error('❌ [Background] Stack:', err.stack);
+        // Não podemos retornar erro ao cliente (já respondemos), apenas logar
       }
     })();
   } catch (err) {
@@ -1842,10 +1826,11 @@ try {
     console.log(`✅ Servidor iniciado com sucesso!`);
   });
   
-  // Configurar timeout do servidor (5 minutos)
-  server.timeout = 5 * 60 * 1000;
-  server.keepAliveTimeout = 65000;
-  server.headersTimeout = 66000;
+  // Configurar timeout do servidor (2 minutos para uploads grandes)
+  // Railway pode ter timeout de gateway, mas aumentamos o máximo possível
+  server.timeout = 2 * 60 * 1000; // 2 minutos (120 segundos)
+  server.keepAliveTimeout = 120000; // 2 minutos
+  server.headersTimeout = 121000; // 2 minutos + 1 segundo
   
   // Tratamento de erros do servidor
   server.on('error', (err) => {
