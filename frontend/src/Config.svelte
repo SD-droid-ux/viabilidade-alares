@@ -634,10 +634,38 @@
       const formData = new FormData();
       formData.append('file', file);
 
-      const response = await fetch(getApiUrl('/api/upload-base'), {
+      const apiUrl = getApiUrl('/api/upload-base');
+      console.log('📤 [Upload] Enviando arquivo para:', apiUrl);
+      console.log('📤 [Upload] Tamanho do arquivo:', file.size, 'bytes');
+
+      const response = await fetch(apiUrl, {
         method: 'POST',
         body: formData
       });
+
+      console.log('📥 [Upload] Resposta recebida:', response.status, response.statusText);
+      console.log('📥 [Upload] Content-Type:', response.headers.get('content-type'));
+
+      // Verificar se a resposta é OK antes de tentar ler
+      if (!response.ok) {
+        // Tentar ler como texto primeiro
+        const errorText = await response.text();
+        console.error('❌ [Upload] Erro HTTP:', response.status, errorText.substring(0, 200));
+        
+        if (response.status === 502) {
+          throw new Error('Servidor não está respondendo (502 Bad Gateway). Verifique se o backend está online.');
+        } else if (response.status === 504) {
+          throw new Error('Timeout do servidor. O arquivo pode ser muito grande. Tente novamente.');
+        } else {
+          // Tentar parsear como JSON se possível
+          try {
+            const errorData = JSON.parse(errorText);
+            throw new Error(errorData.error || `Erro do servidor (${response.status}): ${errorText.substring(0, 100)}`);
+          } catch {
+            throw new Error(`Erro do servidor (${response.status}): ${errorText.substring(0, 200) || response.statusText}`);
+          }
+        }
+      }
 
       const text = await response.text();
       let data;
@@ -648,11 +676,14 @@
       
       try {
         data = JSON.parse(text);
+        console.log('✅ [Upload] Dados recebidos:', data);
       } catch (parseErr) {
-        throw new Error(`Erro ao processar resposta do servidor (${response.status}): ${text.substring(0, 200)}`);
+        console.error('❌ [Upload] Erro ao parsear JSON:', parseErr);
+        console.error('❌ [Upload] Resposta recebida (primeiros 500 chars):', text.substring(0, 500));
+        throw new Error(`Erro ao processar resposta do servidor. O servidor retornou: ${text.substring(0, 200)}`);
       }
 
-      if (response.ok && data.success) {
+      if (data.success) {
         uploadSuccess = true;
         uploadMessage = data.message || 'Base de dados atualizada com sucesso!';
         
@@ -673,12 +704,27 @@
         event.target.value = '';
       } else {
         uploadSuccess = false;
-        uploadMessage = data.error || `Erro ao atualizar base de dados (${response.status})`;
+        uploadMessage = data.error || 'Erro ao atualizar base de dados';
       }
     } catch (err) {
       uploadSuccess = false;
-      uploadMessage = `Erro ao fazer upload: ${err.message}`;
-      console.error('Erro ao fazer upload da base:', err);
+      
+      // Mensagens de erro mais específicas
+      if (err.name === 'TypeError' && err.message.includes('Failed to fetch')) {
+        uploadMessage = 'Não foi possível conectar ao servidor. Verifique se o backend está online e tente novamente.';
+      } else if (err.message.includes('CORS')) {
+        uploadMessage = 'Erro de CORS. O servidor não está permitindo requisições do frontend.';
+      } else if (err.message.includes('502')) {
+        uploadMessage = 'Servidor não está respondendo (502 Bad Gateway). Verifique se o backend está online no Railway.';
+      } else if (err.message.includes('504')) {
+        uploadMessage = 'Timeout do servidor. O arquivo pode ser muito grande ou o processamento está demorando. Tente novamente.';
+      } else {
+        uploadMessage = `Erro ao fazer upload: ${err.message}`;
+      }
+      
+      console.error('❌ [Upload] Erro ao fazer upload da base:', err);
+      console.error('❌ [Upload] Tipo do erro:', err.name);
+      console.error('❌ [Upload] Mensagem:', err.message);
     } finally {
       uploadingBase = false;
     }
