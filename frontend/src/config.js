@@ -4,6 +4,12 @@
 export const API_BASE_URL = import.meta.env.VITE_API_URL || '';
 
 export function getApiUrl(path) {
+  // Validar path
+  if (!path || typeof path !== 'string') {
+    console.error('❌ [API] Path inválido:', path);
+    throw new Error('Path da API inválido');
+  }
+  
   // Se path já é uma URL completa, retorna como está
   if (path.startsWith('http://') || path.startsWith('https://')) {
     return path;
@@ -16,6 +22,13 @@ export function getApiUrl(path) {
     const fullUrl = `${base}${cleanPath}`;
     console.log('🔗 [API] VITE_API_URL configurada:', API_BASE_URL);
     console.log('🔗 [API] URL final construída:', fullUrl);
+    
+    // Validar URL construída
+    if (!fullUrl || fullUrl.trim() === '') {
+      console.error('❌ [API] URL construída inválida:', fullUrl);
+      throw new Error('URL da API inválida após construção');
+    }
+    
     return fullUrl;
   }
   
@@ -43,8 +56,16 @@ export function getApiUrl(path) {
       // Em Railway, tenta substituir "frontend" por "backend" no hostname
       // Ex: viabilidade-alares-frontend-production.up.railway.app -> viabilidade-alares-backend-production.up.railway.app
       const backendHostname = hostname.replace(/frontend/i, 'backend');
-      const fullUrl = `${protocol}//${backendHostname}${path}`;
+      const cleanPath = path.startsWith('/') ? path : `/${path}`;
+      const fullUrl = `${protocol}//${backendHostname}${cleanPath}`;
       console.log('🔗 [API] Detectado Railway, usando:', fullUrl);
+      
+      // Validar URL construída
+      if (!fullUrl || fullUrl.trim() === '' || !fullUrl.startsWith('http')) {
+        console.error('❌ [API] URL Railway inválida:', fullUrl);
+        throw new Error('URL da API Railway inválida');
+      }
+      
       return fullUrl;
     }
     
@@ -73,6 +94,12 @@ export function getApiUrl(path) {
   
   // Fallback: usa path relativo (pode funcionar se backend estiver na mesma origem)
   console.warn('⚠️ [API] Não foi possível determinar URL do backend, usando path relativo:', path);
-  return path;
+  
+  // Garantir que sempre retorna uma string válida
+  const fallbackPath = path && typeof path === 'string' ? path : '/api';
+  if (!fallbackPath.startsWith('/')) {
+    return `/${fallbackPath}`;
+  }
+  return fallbackPath;
 }
 
