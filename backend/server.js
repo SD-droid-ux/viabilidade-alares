@@ -6,7 +6,7 @@ import fsPromises from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import multer from 'multer';
-import supabase, { testSupabaseConnection, checkTables } from './supabase.js';
+import supabase, { testSupabaseConnection, checkTables, isSupabaseAvailable } from './supabase.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -447,22 +447,58 @@ app.get('/api/base-last-modified', async (req, res) => {
   }
 });
 
-// Função para ler projetistas do Excel
-function readProjetistas() {
+// Função para ler projetistas do Supabase (nova versão)
+async function readProjetistasFromSupabase() {
+  try {
+    if (!supabase || !isSupabaseAvailable()) {
+      return null; // Retorna null para indicar que deve usar fallback
+    }
+    
+    console.log('📂 [Supabase] Carregando projetistas do Supabase...');
+    
+    const { data, error } = await supabase
+      .from('projetistas')
+      .select('nome, senha')
+      .order('nome', { ascending: true });
+    
+    if (error) {
+      console.error('❌ [Supabase] Erro ao ler projetistas:', error);
+      return null; // Fallback para Excel
+    }
+    
+    const projetistas = (data || []).map(p => ({
+      nome: p.nome || '',
+      senha: p.senha || ''
+    }));
+    
+    console.log(`✅ [Supabase] ${projetistas.length} projetistas carregados do Supabase`);
+    if (projetistas.length > 0) {
+      console.log(`📋 [Supabase] Projetistas: ${projetistas.map(p => p.nome).join(', ')}`);
+    }
+    
+    return projetistas;
+  } catch (err) {
+    console.error('❌ [Supabase] Erro ao ler projetistas:', err);
+    return null; // Fallback para Excel
+  }
+}
+
+// Função para ler projetistas do Excel (fallback)
+function readProjetistasFromExcel() {
   try {
     if (!fs.existsSync(PROJETISTAS_FILE)) {
       console.log(`⚠️ Arquivo de projetistas não encontrado: ${PROJETISTAS_FILE}`);
       return [];
     }
     
-    console.log(`📂 Carregando projetistas de: ${PROJETISTAS_FILE}`);
+    console.log(`📂 [Excel] Carregando projetistas de: ${PROJETISTAS_FILE}`);
     
     const workbook = XLSX.readFile(PROJETISTAS_FILE);
     const sheetName = workbook.SheetNames[0];
     const worksheet = workbook.Sheets[sheetName];
     const data = XLSX.utils.sheet_to_json(worksheet);
     
-    console.log(`📊 Colunas encontradas no Excel: ${Object.keys(data[0] || {})}`);
+    console.log(`📊 [Excel] Colunas encontradas no Excel: ${Object.keys(data[0] || {})}`);
     
     // Procurar colunas 'nome' e 'senha' (case insensitive)
     const nomeCol = data.length > 0 ? Object.keys(data[0]).find(col => col.toLowerCase().trim() === 'nome') : 'nome';
@@ -482,20 +518,97 @@ function readProjetistas() {
       })
       .filter(p => p !== null);
     
-    console.log(`✅ ${projetistas.length} projetistas carregados da base de dados`);
+    console.log(`✅ [Excel] ${projetistas.length} projetistas carregados do Excel`);
     if (projetistas.length > 0) {
-      console.log(`📋 Projetistas: ${projetistas.map(p => p.nome).join(', ')}`);
+      console.log(`📋 [Excel] Projetistas: ${projetistas.map(p => p.nome).join(', ')}`);
     }
     
     return projetistas;
   } catch (err) {
-    console.error('❌ Erro ao ler projetistas:', err);
+    console.error('❌ [Excel] Erro ao ler projetistas:', err);
     return [];
   }
 }
 
-// Função para salvar projetistas no Excel (com lock para prevenir perda de dados)
-async function saveProjetistas(projetistas) {
+// Função para ler projetistas (tenta Supabase primeiro, fallback para Excel)
+// Mantém compatibilidade: função síncrona para uso em rotas síncronas
+function readProjetistas() {
+  // Para uso síncrono, sempre usa Excel (compatibilidade)
+  // Rotas assíncronas devem usar readProjetistasAsync()
+  return readProjetistasFromExcel();
+}
+
+// Função assíncrona para ler projetistas (tenta Supabase primeiro)
+async function readProjetistasAsync() {
+  // Tentar Supabase primeiro
+  const supabaseData = await readProjetistasFromSupabase();
+  if (supabaseData !== null) {
+    return supabaseData;
+  }
+  
+  // Fallback para Excel
+  return readProjetistasFromExcel();
+}
+
+// Função para salvar projetistas no Supabase (nova versão)
+async function saveProjetistasToSupabase(projetistas) {
+  try {
+    if (!supabase || !isSupabaseAvailable()) {
+      return false; // Indica que deve usar fallback
+    }
+    
+    console.log('💾 [Supabase] Salvando projetistas no Supabase...');
+    
+    // Normalizar dados
+    const dataToSave = projetistas.map(p => {
+      if (typeof p === 'string') {
+        return { nome: p.trim(), senha: '' };
+      }
+      return {
+        nome: (p.nome || '').trim(),
+        senha: (p.senha || '').trim()
+      };
+    }).filter(p => p.nome); // Remover vazios
+    
+    // Deletar todos os projetistas existentes e inserir os novos
+    // (Isso garante sincronização completa)
+    const { error: deleteError } = await supabase
+      .from('projetistas')
+      .delete()
+      .neq('id', 0); // Deletar todos (condição sempre verdadeira)
+    
+    if (deleteError) {
+      console.error('❌ [Supabase] Erro ao limpar projetistas:', deleteError);
+      return false;
+    }
+    
+    // Inserir todos os projetistas
+    if (dataToSave.length > 0) {
+      const { error: insertError } = await supabase
+        .from('projetistas')
+        .insert(dataToSave);
+      
+      if (insertError) {
+        console.error('❌ [Supabase] Erro ao inserir projetistas:', insertError);
+        return false;
+      }
+    }
+    
+    console.log(`✅ [Supabase] ${dataToSave.length} projetistas salvos no Supabase`);
+    if (dataToSave.length > 0) {
+      const nomes = dataToSave.map(p => p.nome).join(', ');
+      console.log(`📋 [Supabase] Projetistas: ${nomes}`);
+    }
+    
+    return true; // Sucesso
+  } catch (err) {
+    console.error('❌ [Supabase] Erro ao salvar projetistas:', err);
+    return false; // Fallback para Excel
+  }
+}
+
+// Função para salvar projetistas no Excel (fallback)
+async function saveProjetistasToExcel(projetistas) {
   return await withLock('projetistas', async () => {
     try {
       // Criar dados para o Excel (com nome e senha)
@@ -514,17 +627,30 @@ async function saveProjetistas(projetistas) {
       
       // Salvar arquivo (atualiza a base de dados)
       XLSX.writeFile(workbook, PROJETISTAS_FILE);
-      console.log(`✅ Base de dados atualizada! Projetistas salvos no Excel: ${projetistas.length} projetistas`);
-      console.log(`📁 Arquivo: ${PROJETISTAS_FILE}`);
+      console.log(`✅ [Excel] Base de dados atualizada! Projetistas salvos no Excel: ${projetistas.length} projetistas`);
+      console.log(`📁 [Excel] Arquivo: ${PROJETISTAS_FILE}`);
       if (projetistas.length > 0) {
         const nomes = projetistas.map(p => typeof p === 'string' ? p : p.nome).join(', ');
-        console.log(`📋 Projetistas na base: ${nomes}`);
+        console.log(`📋 [Excel] Projetistas na base: ${nomes}`);
       }
     } catch (err) {
-      console.error('❌ Erro ao salvar projetistas:', err);
+      console.error('❌ [Excel] Erro ao salvar projetistas:', err);
       throw err;
     }
   });
+}
+
+// Função para salvar projetistas (tenta Supabase primeiro, fallback para Excel)
+async function saveProjetistas(projetistas) {
+  // Tentar Supabase primeiro
+  const saved = await saveProjetistasToSupabase(projetistas);
+  if (saved) {
+    return; // Sucesso no Supabase
+  }
+  
+  // Fallback para Excel
+  console.log('⚠️ [Save] Usando fallback Excel para salvar projetistas');
+  await saveProjetistasToExcel(projetistas);
 }
 
 // Função para ler tabulações do Excel
@@ -786,9 +912,10 @@ async function saveVIALARecord(record) {
 }
 
 // Rota para listar projetistas
-app.get('/api/projetistas', (req, res) => {
+app.get('/api/projetistas', async (req, res) => {
   try {
-    const projetistas = readProjetistas();
+    // Usar versão assíncrona que tenta Supabase primeiro
+    const projetistas = await readProjetistasAsync();
     // Retornar apenas os nomes para compatibilidade com frontend (sem senhas)
     const nomesProjetistas = projetistas.map(p => typeof p === 'string' ? p : p.nome);
     res.json({ success: true, projetistas: nomesProjetistas });
@@ -812,6 +939,44 @@ app.post('/api/projetistas', async (req, res) => {
     
     const nomeLimpo = nome.trim();
     const senhaLimpa = senha.trim();
+    
+    // Tentar adicionar no Supabase primeiro
+    if (supabase && isSupabaseAvailable()) {
+      try {
+        // Verificar se já existe
+        const { data: existing } = await supabase
+          .from('projetistas')
+          .select('nome')
+          .ilike('nome', nomeLimpo)
+          .limit(1);
+        
+        if (existing && existing.length > 0) {
+          return res.json({ success: false, error: 'Projetista já existe' });
+        }
+        
+        // Inserir no Supabase
+        const { error } = await supabase
+          .from('projetistas')
+          .insert([{ nome: nomeLimpo, senha: senhaLimpa }]);
+        
+        if (error) {
+          throw error;
+        }
+        
+        console.log(`✅ [Supabase] Projetista '${nomeLimpo}' adicionado no Supabase`);
+        
+        // Buscar todos para retornar
+        const projetistas = await readProjetistasAsync();
+        const nomesProjetistas = projetistas.map(p => p.nome);
+        
+        return res.json({ success: true, projetistas: nomesProjetistas, message: 'Projetista adicionado com sucesso' });
+      } catch (supabaseErr) {
+        console.error('❌ [Supabase] Erro ao adicionar projetista, usando fallback Excel:', supabaseErr);
+        // Continuar com fallback Excel
+      }
+    }
+    
+    // Fallback: usar Excel
     let projetistas = readProjetistas();
     
     // Verificar se já existe (comparar por nome)
@@ -858,10 +1023,58 @@ app.delete('/api/projetistas/:nome', async (req, res) => {
     
     console.log(`🔍 Tentando deletar projetista: '${nomeDecoded}'`);
     
+    // Tentar deletar no Supabase primeiro
+    if (supabase && isSupabaseAvailable()) {
+      try {
+        // Buscar projetista para verificar se existe
+        const { data: existing } = await supabase
+          .from('projetistas')
+          .select('nome')
+          .ilike('nome', nomeDecoded)
+          .limit(1);
+        
+        if (!existing || existing.length === 0) {
+          const projetistas = await readProjetistasAsync();
+          const nomesAntes = projetistas.map(p => p.nome);
+          return res.json({ 
+            success: false, 
+            projetistas: nomesAntes, 
+            message: 'Projetista não encontrado' 
+          });
+        }
+        
+        // Deletar do Supabase
+        const { error } = await supabase
+          .from('projetistas')
+          .delete()
+          .ilike('nome', nomeDecoded);
+        
+        if (error) {
+          throw error;
+        }
+        
+        console.log(`✅ [Supabase] Projetista '${nomeDecoded}' deletado do Supabase`);
+        
+        // Buscar todos para retornar
+        const projetistas = await readProjetistasAsync();
+        const nomesProjetistas = projetistas.map(p => p.nome);
+        
+        return res.json({ 
+          success: true, 
+          projetistas: nomesProjetistas, 
+          message: `Projetista '${nomeDecoded}' deletado com sucesso` 
+        });
+      } catch (supabaseErr) {
+        console.error('❌ [Supabase] Erro ao deletar projetista, usando fallback Excel:', supabaseErr);
+        // Continuar com fallback Excel
+      }
+    }
+    
+    // Fallback: usar Excel
     let projetistas = readProjetistas();
     
     const nomesAntes = projetistas.map(p => typeof p === 'string' ? p : p.nome);
-    console.log(`📋 Projetistas antes da exclusão: ${nomesAntes.join(', ')}`);
+    console.log(`📋 [Excel] Projetistas antes da exclusão: ${nomesAntes.join(', ')}`);
     
     // Verificar se existe (comparar por nome)
     const existe = projetistas.some(p => {
@@ -886,7 +1099,7 @@ app.delete('/api/projetistas/:nome', async (req, res) => {
     });
     const projetistasDepois = projetistas.length;
     
-    console.log(`📊 Projetistas antes: ${projetistasAntes}, depois: ${projetistasDepois}`);
+    console.log(`📊 [Excel] Projetistas antes: ${projetistasAntes}, depois: ${projetistasDepois}`);
     
     // Salvar na planilha Excel (atualiza a base de dados)
     await saveProjetistas(projetistas);
@@ -908,7 +1121,7 @@ app.delete('/api/projetistas/:nome', async (req, res) => {
 });
 
 // Rota para autenticar usuário (validar login)
-app.post('/api/auth/login', (req, res) => {
+app.post('/api/auth/login', async (req, res) => {
   try {
     const { usuario, senha } = req.body;
     
@@ -920,24 +1133,72 @@ app.post('/api/auth/login', (req, res) => {
       return res.status(400).json({ success: false, error: 'Senha é obrigatória' });
     }
     
-    const projetistas = readProjetistas();
     const usuarioLimpo = usuario.trim();
     const senhaLimpa = senha.trim();
     
-    // Buscar projetista pelo nome (case insensitive)
-    const projetista = projetistas.find(p => {
-      const nomeProj = typeof p === 'string' ? p : p.nome;
-      return nomeProj.toLowerCase() === usuarioLimpo.toLowerCase();
-    });
-    
-    if (!projetista) {
-      return res.json({ success: false, error: 'Usuário ou senha incorretos' });
-    }
-    
-    // Verificar senha
-    const senhaProj = typeof projetista === 'string' ? '' : projetista.senha;
-    if (senhaProj !== senhaLimpa) {
-      return res.json({ success: false, error: 'Usuário ou senha incorretos' });
+    // Tentar buscar no Supabase primeiro
+    if (supabase && isSupabaseAvailable()) {
+      try {
+        const { data, error } = await supabase
+          .from('projetistas')
+          .select('nome, senha')
+          .ilike('nome', usuarioLimpo)
+          .limit(1);
+        
+        if (error) {
+          throw error;
+        }
+        
+        if (!data || data.length === 0) {
+          return res.json({ success: false, error: 'Usuário ou senha incorretos' });
+        }
+        
+        const projetista = data[0];
+        if (projetista.senha !== senhaLimpa) {
+          return res.json({ success: false, error: 'Usuário ou senha incorretos' });
+        }
+        
+        // Login válido - continuar com registro de sessão
+      } catch (supabaseErr) {
+        console.error('❌ [Supabase] Erro ao validar login, usando fallback Excel:', supabaseErr);
+        // Continuar com fallback Excel
+        const projetistas = readProjetistas();
+        
+        // Buscar projetista pelo nome (case insensitive)
+        const projetista = projetistas.find(p => {
+          const nomeProj = typeof p === 'string' ? p : p.nome;
+          return nomeProj.toLowerCase() === usuarioLimpo.toLowerCase();
+        });
+        
+        if (!projetista) {
+          return res.json({ success: false, error: 'Usuário ou senha incorretos' });
+        }
+        
+        // Verificar senha
+        const senhaProj = typeof projetista === 'string' ? '' : projetista.senha;
+        if (senhaProj !== senhaLimpa) {
+          return res.json({ success: false, error: 'Usuário ou senha incorretos' });
+        }
+      }
+    } else {
+      // Fallback: usar Excel
+      const projetistas = readProjetistas();
+      
+      // Buscar projetista pelo nome (case insensitive)
+      const projetista = projetistas.find(p => {
+        const nomeProj = typeof p === 'string' ? p : p.nome;
+        return nomeProj.toLowerCase() === usuarioLimpo.toLowerCase();
+      });
+      
+      if (!projetista) {
+        return res.json({ success: false, error: 'Usuário ou senha incorretos' });
+      }
+      
+      // Verificar senha
+      const senhaProj = typeof projetista === 'string' ? '' : projetista.senha;
+      if (senhaProj !== senhaLimpa) {
+        return res.json({ success: false, error: 'Usuário ou senha incorretos' });
+      }
     }
     
     // Registrar usuário como online
@@ -977,6 +1238,39 @@ app.put('/api/projetistas/:nome/password', async (req, res) => {
       return res.status(400).json({ success: false, error: 'A senha deve ter pelo menos 4 caracteres' });
     }
     
+    // Tentar atualizar no Supabase primeiro
+    if (supabase && isSupabaseAvailable()) {
+      try {
+        // Buscar projetista
+        const { data: existing } = await supabase
+          .from('projetistas')
+          .select('id, nome')
+          .ilike('nome', nomeDecoded)
+          .limit(1);
+        
+        if (!existing || existing.length === 0) {
+          return res.status(404).json({ success: false, error: 'Projetista não encontrado' });
+        }
+        
+        // Atualizar senha
+        const { error } = await supabase
+          .from('projetistas')
+          .update({ senha: senha.trim() })
+          .eq('id', existing[0].id);
+        
+        if (error) {
+          throw error;
+        }
+        
+        console.log(`✅ [Supabase] Senha do projetista '${nomeDecoded}' atualizada no Supabase`);
+        return res.json({ success: true, message: 'Senha atualizada com sucesso' });
+      } catch (supabaseErr) {
+        console.error('❌ [Supabase] Erro ao atualizar senha, usando fallback Excel:', supabaseErr);
+        // Continuar com fallback Excel
+      }
+    }
+    
+    // Fallback: usar Excel
     let projetistas = readProjetistas();
     
     // Buscar projetista pelo nome (case insensitive)
@@ -1010,7 +1304,7 @@ app.put('/api/projetistas/:nome/password', async (req, res) => {
 });
 
 // Rota para atualizar nome do projetista
-app.put('/api/projetistas/:nome/name', (req, res) => {
+app.put('/api/projetistas/:nome/name', async (req, res) => {
   try {
     const nomeEncoded = req.params.nome;
     const nomeDecoded = decodeURIComponent(nomeEncoded).trim();
@@ -1030,6 +1324,65 @@ app.put('/api/projetistas/:nome/name', (req, res) => {
       return res.status(400).json({ success: false, error: 'O novo nome deve ter pelo menos 2 caracteres' });
     }
     
+    // Tentar atualizar no Supabase primeiro
+    if (supabase && isSupabaseAvailable()) {
+      try {
+        // Verificar se novo nome já existe
+        const { data: nomeExiste } = await supabase
+          .from('projetistas')
+          .select('nome')
+          .ilike('nome', novoNomeLimpo)
+          .limit(1);
+        
+        if (nomeExiste && nomeExiste.length > 0 && nomeExiste[0].nome.toLowerCase() !== nomeDecoded.toLowerCase()) {
+          return res.status(400).json({ success: false, error: 'Este nome já está em uso por outro usuário' });
+        }
+        
+        // Buscar projetista
+        const { data: existing } = await supabase
+          .from('projetistas')
+          .select('id, nome, senha')
+          .ilike('nome', nomeDecoded)
+          .limit(1);
+        
+        if (!existing || existing.length === 0) {
+          return res.status(404).json({ success: false, error: 'Projetista não encontrado' });
+        }
+        
+        // Atualizar nome
+        const { error } = await supabase
+          .from('projetistas')
+          .update({ nome: novoNomeLimpo })
+          .eq('id', existing[0].id);
+        
+        if (error) {
+          throw error;
+        }
+        
+        console.log(`✅ [Supabase] Nome do projetista '${nomeDecoded}' atualizado para '${novoNomeLimpo}' no Supabase`);
+        
+        // Atualizar sessões ativas se o usuário estiver logado
+        if (activeSessions[nomeDecoded]) {
+          const sessionData = activeSessions[nomeDecoded];
+          delete activeSessions[nomeDecoded];
+          activeSessions[novoNomeLimpo] = sessionData;
+          console.log(`🔄 Sessão ativa atualizada: '${nomeDecoded}' → '${novoNomeLimpo}'`);
+        }
+        
+        // Atualizar histórico de logout se existir
+        if (logoutHistory[nomeDecoded]) {
+          logoutHistory[novoNomeLimpo] = logoutHistory[nomeDecoded];
+          delete logoutHistory[nomeDecoded];
+        }
+        
+        return res.json({ success: true, message: 'Nome atualizado com sucesso', novoNome: novoNomeLimpo });
+      } catch (supabaseErr) {
+        console.error('❌ [Supabase] Erro ao atualizar nome, usando fallback Excel:', supabaseErr);
+        // Continuar com fallback Excel
+      }
+    }
+    
+    // Fallback: usar Excel
     let projetistas = readProjetistas();
     
     // Verificar se o novo nome já existe (case insensitive)
@@ -1069,7 +1422,7 @@ app.put('/api/projetistas/:nome/name', (req, res) => {
     });
     
     // Salvar no Excel
-    saveProjetistas(projetistas);
+    await saveProjetistas(projetistas);
     
     // Atualizar sessões ativas se o usuário estiver logado
     if (activeSessions[nomeDecoded]) {
