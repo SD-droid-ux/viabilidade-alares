@@ -679,16 +679,20 @@
       }
       
       console.log('📤 [Upload] Enviando arquivo para:', apiUrl);
+      console.log('📤 [Upload] Método HTTP:', 'POST');
       console.log('📤 [Upload] Tamanho do arquivo:', file.size, 'bytes');
       console.log('📤 [Upload] Tipo do arquivo:', file.type || 'não especificado');
+      console.log('📤 [Upload] FormData criado:', formData.has('file'));
 
       // Fazer fetch com tratamento de erro específico
       let response;
       try {
-        response = await fetch(apiUrl, {
+        const fetchOptions = {
           method: 'POST',
           body: formData
-        });
+        };
+        console.log('📤 [Upload] Opções do fetch:', { method: fetchOptions.method, hasBody: !!fetchOptions.body });
+        response = await fetch(apiUrl, fetchOptions);
       } catch (fetchError) {
         console.error('❌ [Upload] Erro no fetch:', fetchError);
         console.error('❌ [Upload] URL usada:', apiUrl);
