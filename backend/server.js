@@ -80,16 +80,34 @@ app.use((req, res, next) => {
 });
 
 // Configurar multer para upload de arquivos
+// OTIMIZAÇÃO DE MEMÓRIA: Usar diskStorage em vez de memoryStorage
+// Isso evita carregar arquivos grandes na memória, prevenindo "Out of memory" no Railway
 let upload;
 try {
+  // Criar pasta temporária para uploads
+  const TEMP_DIR = path.join(DATA_DIR, 'temp');
+  if (!fs.existsSync(TEMP_DIR)) {
+    fs.mkdirSync(TEMP_DIR, { recursive: true });
+  }
+  
   upload = multer({ 
-    storage: multer.memoryStorage(),
+    storage: multer.diskStorage({
+      destination: (req, file, cb) => {
+        cb(null, TEMP_DIR);
+      },
+      filename: (req, file, cb) => {
+        // Nome único para evitar conflitos
+        const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+        cb(null, `upload-${uniqueSuffix}-${file.originalname}`);
+      }
+    }),
     limits: { 
       fileSize: 100 * 1024 * 1024, // 100MB limite
       files: 1,
       fields: 0
     }
   });
+  console.log('✅ Multer configurado com diskStorage (otimizado para memória)');
 } catch (err) {
   console.error('❌ Erro ao configurar multer:', err);
   console.error('Certifique-se de que o multer está instalado: npm install multer');
@@ -309,6 +327,40 @@ setInterval(() => {
     }
   });
 }, 60000); // Verificar a cada minuto
+
+// Limpar arquivos temporários antigos periodicamente (a cada 1 hora)
+// Isso previne acúmulo de arquivos temporários em caso de erros
+setInterval(async () => {
+  try {
+    const TEMP_DIR = path.join(DATA_DIR, 'temp');
+    if (!fs.existsSync(TEMP_DIR)) {
+      return;
+    }
+    
+    const files = await fsPromises.readdir(TEMP_DIR);
+    const now = Date.now();
+    const MAX_AGE = 60 * 60 * 1000; // 1 hora
+    
+    for (const file of files) {
+      if (file.startsWith('upload-')) {
+        const filePath = path.join(TEMP_DIR, file);
+        try {
+          const stats = await fsPromises.stat(filePath);
+          const age = now - stats.mtime.getTime();
+          
+          if (age > MAX_AGE) {
+            await fsPromises.unlink(filePath);
+            console.log(`🗑️ [Cleanup] Arquivo temporário antigo removido: ${file}`);
+          }
+        } catch (err) {
+          console.error(`❌ [Cleanup] Erro ao verificar/remover arquivo temporário ${file}:`, err.message);
+        }
+      }
+    }
+  } catch (err) {
+    console.error('❌ [Cleanup] Erro ao limpar arquivos temporários:', err.message);
+  }
+}, 60 * 60 * 1000); // A cada 1 hora
 
 // Migrar arquivos da localização antiga se necessário
 const OLD_PROJETISTAS = path.join(__dirname, '../frontend/public/projetistas.xlsx');
@@ -1043,11 +1095,16 @@ app.put('/api/projetistas/:nome/name', (req, res) => {
 });
 
 // Função para validar estrutura do arquivo Excel (ultra-otimizada para não travar)
-function validateExcelStructure(fileBuffer) {
+// OTIMIZAÇÃO: Aceita tanto Buffer (memória) quanto caminho de arquivo (disco)
+function validateExcelStructure(filePathOrBuffer) {
   try {
+    // Determinar se é caminho de arquivo ou buffer
+    const isFilePath = typeof filePathOrBuffer === 'string';
+    
     // Ler apenas metadados primeiro (muito rápido)
-    const workbook = XLSX.read(fileBuffer, { 
-      type: 'buffer',
+    // Se for caminho de arquivo, ler do disco diretamente (economiza memória)
+    const workbook = XLSX.read(filePathOrBuffer, { 
+      type: isFilePath ? 'file' : 'buffer',
       cellDates: false,
       cellNF: false,
       cellStyles: false,
@@ -1295,8 +1352,14 @@ app.post('/api/upload-base', (req, res, next) => {
       });
     }
 
-    console.log(`📤 Arquivo recebido: ${req.file.originalname} (${req.file.size} bytes)`);
+    // Obter informações do arquivo
+    const tempFilePath = req.file.path;
+    const fileSize = req.file.size;
+    const fileName = req.file.originalname;
+    
+    console.log(`📤 Arquivo recebido: ${fileName} (${fileSize} bytes)`);
     console.log(`📋 Tipo MIME: ${req.file.mimetype}`);
+    console.log(`💾 Arquivo salvo temporariamente em: ${tempFilePath}`);
 
     // Garantir headers CORS na resposta ANTES de qualquer processamento
     if (origin) {
@@ -1312,20 +1375,33 @@ app.post('/api/upload-base', (req, res, next) => {
       success: true,
       message: `Upload recebido! Validando e processando arquivo em background...`,
       processing: true,
-      fileSize: req.file.size,
-      fileName: req.file.originalname
+      fileSize: fileSize,
+      fileName: fileName
     });
+    
+    console.log(`💾 [Upload] Arquivo salvo temporariamente em: ${tempFilePath} (${fileSize} bytes)`);
     
     // Processar validação e salvamento em background (não bloqueia resposta)
     (async () => {
+      let tempFileDeleted = false;
       try {
         console.log('🔍 [Background] Iniciando validação do arquivo...');
-        const validation = validateExcelStructure(req.file.buffer);
+        
+        // OTIMIZAÇÃO DE MEMÓRIA: Validar diretamente do arquivo no disco
+        // Isso evita carregar o arquivo inteiro na memória
+        const validation = validateExcelStructure(tempFilePath);
         console.log(`📊 [Background] Resultado da validação:`, validation);
         
         if (!validation.valid) {
           console.error(`❌ [Background] Validação falhou: ${validation.error}`);
-          // Log do erro, mas não podemos retornar ao cliente (já respondemos)
+          // Deletar arquivo temporário
+          try {
+            await fsPromises.unlink(tempFilePath);
+            tempFileDeleted = true;
+            console.log('🗑️ [Background] Arquivo temporário removido após validação falhar');
+          } catch (unlinkErr) {
+            console.error('❌ [Background] Erro ao remover arquivo temporário:', unlinkErr);
+          }
           return;
         }
 
@@ -1437,13 +1513,26 @@ app.post('/api/upload-base', (req, res, next) => {
         }
         
         // 7. Salvar NOVA base como base_atual_DD-MM-YYYY.xlsx
+        // OTIMIZAÇÃO: Mover arquivo temporário em vez de copiar (mais rápido e usa menos memória)
         const newBaseFileName = `base_atual_${dateStr}.xlsx`;
         const newBasePath = path.join(DATA_DIR, newBaseFileName);
         
-        console.log(`💾 [Background] Salvando nova base: ${newBaseFileName} (${req.file.size} bytes)`);
+        console.log(`💾 [Background] Movendo arquivo temporário para: ${newBaseFileName} (${fileSize} bytes)`);
         
-        // Salvar novo arquivo
-        await fsPromises.writeFile(newBasePath, req.file.buffer);
+        // Mover arquivo temporário para a localização final (mais eficiente que copiar)
+        try {
+          await fsPromises.rename(tempFilePath, newBasePath);
+          tempFileDeleted = true; // Arquivo foi movido, não precisa deletar
+          console.log(`✅ [Background] Arquivo movido com sucesso (sem usar memória extra)`);
+        } catch (renameErr) {
+          // Se renomear falhar (pode ser por estar em volumes diferentes), copiar
+          console.warn('⚠️ [Background] Erro ao renomear, copiando arquivo...', renameErr.message);
+          await fsPromises.copyFile(tempFilePath, newBasePath);
+          // Deletar arquivo temporário após copiar
+          await fsPromises.unlink(tempFilePath);
+          tempFileDeleted = true;
+          console.log(`✅ [Background] Arquivo copiado e temporário removido`);
+        }
         
         console.log(`✅ [Background] Nova base de dados salva com sucesso: ${newBaseFileName}`);
         console.log(`✅ [Background] Processamento concluído: ${validation.validRows} linhas válidas de ${validation.totalRows} total`);
@@ -1451,6 +1540,16 @@ app.post('/api/upload-base', (req, res, next) => {
       } catch (err) {
         console.error('❌ [Background] Erro ao processar arquivo em background:', err);
         console.error('❌ [Background] Stack:', err.stack);
+        
+        // Garantir que arquivo temporário seja deletado mesmo em caso de erro
+        if (!tempFileDeleted && tempFilePath) {
+          try {
+            await fsPromises.unlink(tempFilePath);
+            console.log('🗑️ [Background] Arquivo temporário removido após erro');
+          } catch (unlinkErr) {
+            console.error('❌ [Background] Erro ao remover arquivo temporário após erro:', unlinkErr);
+          }
+        }
         // Não podemos retornar erro ao cliente (já respondemos), apenas logar
       }
     })();
