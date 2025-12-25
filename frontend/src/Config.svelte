@@ -635,6 +635,22 @@
       formData.append('file', file);
 
       const apiUrl = getApiUrl('/api/upload-base');
+      
+      // Validar URL antes de fazer fetch
+      if (!apiUrl || typeof apiUrl !== 'string' || apiUrl.trim() === '') {
+        throw new Error('URL da API inválida. Verifique a configuração VITE_API_URL.');
+      }
+      
+      // Validar se é uma URL válida
+      try {
+        new URL(apiUrl);
+      } catch (urlError) {
+        // Se não é uma URL absoluta, pode ser um path relativo (OK para desenvolvimento)
+        if (!apiUrl.startsWith('/')) {
+          throw new Error(`URL da API inválida: ${apiUrl}`);
+        }
+      }
+      
       console.log('📤 [Upload] Enviando arquivo para:', apiUrl);
       console.log('📤 [Upload] Tamanho do arquivo:', file.size, 'bytes');
 
