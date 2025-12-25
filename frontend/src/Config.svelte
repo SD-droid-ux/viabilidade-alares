@@ -634,30 +634,72 @@
       const formData = new FormData();
       formData.append('file', file);
 
-      const apiUrl = getApiUrl('/api/upload-base');
-      
-      // Validar URL antes de fazer fetch
-      if (!apiUrl || typeof apiUrl !== 'string' || apiUrl.trim() === '') {
-        throw new Error('URL da API inválida. Verifique a configuração VITE_API_URL.');
+      // Obter URL da API com tratamento de erro robusto
+      let apiUrl;
+      try {
+        apiUrl = getApiUrl('/api/upload-base');
+      } catch (urlError) {
+        console.error('❌ [Upload] Erro ao obter URL da API:', urlError);
+        throw new Error('Erro ao construir URL da API. Verifique a configuração VITE_API_URL.');
       }
       
-      // Validar se é uma URL válida
-      try {
-        new URL(apiUrl);
-      } catch (urlError) {
-        // Se não é uma URL absoluta, pode ser um path relativo (OK para desenvolvimento)
-        if (!apiUrl.startsWith('/')) {
-          throw new Error(`URL da API inválida: ${apiUrl}`);
+      // Validar URL antes de fazer fetch
+      if (!apiUrl) {
+        console.error('❌ [Upload] apiUrl é null ou undefined');
+        throw new Error('URL da API inválida (null/undefined). Verifique a configuração VITE_API_URL.');
+      }
+      
+      if (typeof apiUrl !== 'string') {
+        console.error('❌ [Upload] apiUrl não é string:', typeof apiUrl, apiUrl);
+        throw new Error(`URL da API inválida (tipo: ${typeof apiUrl}). Verifique a configuração VITE_API_URL.`);
+      }
+      
+      if (apiUrl.trim() === '') {
+        console.error('❌ [Upload] apiUrl é string vazia');
+        throw new Error('URL da API inválida (string vazia). Verifique a configuração VITE_API_URL.');
+      }
+      
+      // Validar se é uma URL válida ou path relativo
+      const isAbsoluteUrl = apiUrl.startsWith('http://') || apiUrl.startsWith('https://');
+      const isRelativePath = apiUrl.startsWith('/');
+      
+      if (!isAbsoluteUrl && !isRelativePath) {
+        console.error('❌ [Upload] apiUrl não é URL absoluta nem path relativo:', apiUrl);
+        throw new Error(`URL da API inválida (formato incorreto): ${apiUrl}`);
+      }
+      
+      // Se é URL absoluta, validar formato
+      if (isAbsoluteUrl) {
+        try {
+          new URL(apiUrl);
+        } catch (urlError) {
+          console.error('❌ [Upload] Erro ao validar URL:', urlError);
+          throw new Error(`URL da API inválida (formato incorreto): ${apiUrl}`);
         }
       }
       
       console.log('📤 [Upload] Enviando arquivo para:', apiUrl);
       console.log('📤 [Upload] Tamanho do arquivo:', file.size, 'bytes');
+      console.log('📤 [Upload] Tipo do arquivo:', file.type || 'não especificado');
 
-      const response = await fetch(apiUrl, {
-        method: 'POST',
-        body: formData
-      });
+      // Fazer fetch com tratamento de erro específico
+      let response;
+      try {
+        response = await fetch(apiUrl, {
+          method: 'POST',
+          body: formData
+        });
+      } catch (fetchError) {
+        console.error('❌ [Upload] Erro no fetch:', fetchError);
+        console.error('❌ [Upload] URL usada:', apiUrl);
+        console.error('❌ [Upload] Tipo do erro:', fetchError.name);
+        console.error('❌ [Upload] Mensagem:', fetchError.message);
+        
+        if (fetchError.name === 'TypeError' && fetchError.message.includes('Failed to fetch')) {
+          throw new Error('Não foi possível conectar ao servidor. Verifique se o backend está online.');
+        }
+        throw fetchError;
+      }
 
       console.log('📥 [Upload] Resposta recebida:', response.status, response.statusText);
       console.log('📥 [Upload] Content-Type:', response.headers.get('content-type'));
