@@ -12,33 +12,40 @@ const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY;
 const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY;
 
-// Validar variáveis de ambiente
-if (!SUPABASE_URL) {
-  console.error('❌ [Supabase] SUPABASE_URL não configurada!');
-  console.error('❌ [Supabase] Configure a variável de ambiente SUPABASE_URL');
-  throw new Error('SUPABASE_URL não configurada');
-}
+// Validar variáveis de ambiente (mas não quebrar o servidor se não estiverem configuradas)
+// Isso permite que o servidor funcione mesmo sem Supabase (modo compatibilidade)
+let supabase = null;
+let supabaseAvailable = false;
 
-if (!SUPABASE_SERVICE_KEY) {
-  console.error('❌ [Supabase] SUPABASE_SERVICE_KEY não configurada!');
-  console.error('❌ [Supabase] Configure a variável de ambiente SUPABASE_SERVICE_KEY');
-  throw new Error('SUPABASE_SERVICE_KEY não configurada');
-}
-
-// Criar cliente Supabase com service_role key (acesso total ao banco)
-// Usamos service_role porque o backend precisa de acesso completo
-const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY, {
-  auth: {
-    autoRefreshToken: false,
-    persistSession: false
-  },
-  db: {
-    schema: 'public'
+if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) {
+  console.warn('⚠️ [Supabase] Variáveis de ambiente não configuradas!');
+  console.warn('⚠️ [Supabase] O servidor continuará funcionando, mas Supabase não estará disponível');
+  console.warn('⚠️ [Supabase] Configure as variáveis: SUPABASE_URL e SUPABASE_SERVICE_KEY');
+  console.warn('⚠️ [Supabase] O sistema usará arquivos Excel até que Supabase seja configurado');
+} else {
+  try {
+    // Criar cliente Supabase com service_role key (acesso total ao banco)
+    // Usamos service_role porque o backend precisa de acesso completo
+    supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY, {
+      auth: {
+        autoRefreshToken: false,
+        persistSession: false
+      },
+      db: {
+        schema: 'public'
+      }
+    });
+    supabaseAvailable = true;
+    console.log('✅ [Supabase] Cliente criado com sucesso');
+  } catch (err) {
+    console.error('❌ [Supabase] Erro ao criar cliente:', err.message);
+    console.warn('⚠️ [Supabase] O servidor continuará funcionando sem Supabase');
   }
-});
+}
 
 // Cliente com anon key (para uso futuro, se necessário)
-const supabaseAnon = SUPABASE_ANON_KEY 
+// Só cria se SUPABASE_URL e SUPABASE_ANON_KEY estiverem configurados
+const supabaseAnon = (SUPABASE_URL && SUPABASE_ANON_KEY)
   ? createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
       auth: {
         autoRefreshToken: false,
@@ -49,6 +56,13 @@ const supabaseAnon = SUPABASE_ANON_KEY
 
 // Função para testar conexão com Supabase
 export async function testSupabaseConnection() {
+  if (!supabaseAvailable || !supabase) {
+    return { 
+      success: false, 
+      error: 'Supabase não configurado. Configure SUPABASE_URL e SUPABASE_SERVICE_KEY' 
+    };
+  }
+  
   try {
     console.log('🔍 [Supabase] Testando conexão...');
     console.log('🔍 [Supabase] URL:', SUPABASE_URL);
@@ -79,6 +93,12 @@ export async function testSupabaseConnection() {
 
 // Função para verificar se as tabelas existem
 export async function checkTables() {
+  if (!supabaseAvailable || !supabase) {
+    return { 
+      error: 'Supabase não configurado. Configure SUPABASE_URL e SUPABASE_SERVICE_KEY' 
+    };
+  }
+  
   try {
     console.log('🔍 [Supabase] Verificando tabelas...');
     
@@ -115,21 +135,31 @@ export async function checkTables() {
 }
 
 // Exportar cliente principal (com service_role - acesso total)
+// Pode ser null se não estiver configurado
 export default supabase;
+
+// Exportar flag de disponibilidade
+export const isSupabaseAvailable = () => supabaseAvailable;
 
 // Exportar cliente anon (se necessário no futuro)
 export { supabaseAnon };
 
 // Exportar informações de configuração (para debug)
 export const supabaseConfig = {
-  url: SUPABASE_URL,
+  url: SUPABASE_URL || 'Não configurado',
   hasServiceKey: !!SUPABASE_SERVICE_KEY,
-  hasAnonKey: !!SUPABASE_ANON_KEY
+  hasAnonKey: !!SUPABASE_ANON_KEY,
+  available: supabaseAvailable
 };
 
 // Log de inicialização
-console.log('✅ [Supabase] Módulo carregado');
-console.log('✅ [Supabase] URL:', SUPABASE_URL);
-console.log('✅ [Supabase] Service Key configurada:', !!SUPABASE_SERVICE_KEY);
-console.log('✅ [Supabase] Anon Key configurada:', !!SUPABASE_ANON_KEY);
+if (supabaseAvailable) {
+  console.log('✅ [Supabase] Módulo carregado e configurado');
+  console.log('✅ [Supabase] URL:', SUPABASE_URL);
+  console.log('✅ [Supabase] Service Key configurada:', !!SUPABASE_SERVICE_KEY);
+  console.log('✅ [Supabase] Anon Key configurada:', !!SUPABASE_ANON_KEY);
+} else {
+  console.log('⚠️ [Supabase] Módulo carregado, mas não configurado');
+  console.log('⚠️ [Supabase] O sistema usará arquivos Excel até que Supabase seja configurado');
+}
 
