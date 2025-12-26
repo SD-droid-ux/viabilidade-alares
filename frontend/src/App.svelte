@@ -2293,36 +2293,38 @@
           longitude: clientCoords ? clientCoords.lng.toFixed(6) : ''
         };
         
-        console.log('💾 Salvando registro VI ALA na base...', viAlaRecord);
+        console.log('💾 [Frontend] Salvando registro VI ALA na base...', viAlaRecord);
         
-        // Salvar registro na base_VI_ALA (em background, não bloqueia geração do PDF)
-        fetch(getApiUrl('/api/vi-ala/save'), {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify(viAlaRecord)
-        })
-          .then(async res => {
-            if (!res.ok) {
-              const errorText = await res.text();
-              throw new Error(`HTTP ${res.status}: ${errorText}`);
-            }
-            return res.json();
-          })
-          .then(data => {
-            if (data.success) {
-              console.log('✅ Registro VI ALA salvo com sucesso');
-            } else {
-              console.warn('⚠️ Aviso: Não foi possível salvar registro VI ALA:', data.error);
-            }
-          })
-          .catch(err => {
-            console.error('❌ Erro ao salvar registro VI ALA:', err);
-            console.error('❌ Mensagem:', err.message);
+        // Salvar registro na base_VI_ALA (aguardar para garantir que seja salvo)
+        try {
+          const saveResponse = await fetch(getApiUrl('/api/vi-ala/save'), {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(viAlaRecord)
           });
+          
+          if (!saveResponse.ok) {
+            const errorText = await saveResponse.text();
+            throw new Error(`HTTP ${saveResponse.status}: ${errorText}`);
+          }
+          
+          const saveData = await saveResponse.json();
+          
+          if (saveData.success) {
+            console.log('✅ [Frontend] Registro VI ALA salvo com sucesso no Supabase');
+          } else {
+            console.warn('⚠️ [Frontend] Aviso: Não foi possível salvar registro VI ALA:', saveData.error);
+          }
+        } catch (saveErr) {
+          console.error('❌ [Frontend] Erro ao salvar registro VI ALA:', saveErr);
+          console.error('❌ [Frontend] Mensagem:', saveErr.message);
+          console.error('❌ [Frontend] Stack:', saveErr.stack);
+          // Não bloquear geração do PDF se o salvamento falhar, mas logar o erro
+        }
       } else {
-        console.warn('⚠️ VI ALA não foi obtido, não será salvo na base');
+        console.warn('⚠️ [Frontend] VI ALA não foi obtido, não será salvo na base');
       }
 
       // Criar nome do arquivo PDF com VI ALA no formato: "VI ALA - XXXXXXX - ALA-15002 - Engenharia.pdf"
