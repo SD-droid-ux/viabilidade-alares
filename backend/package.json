@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "start": "node --max-old-space-size=1024 server.js",
+    "start": "node --max-old-space-size=2048 server.js",
     "dev": "node --watch server.js"
   },
   "dependencies": {
