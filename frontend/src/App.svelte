@@ -3389,7 +3389,13 @@
                 tabindex="-1"
                 aria-label="Fechar modal de informação"
               >
-                <div class="info-modal-box" on:click|stopPropagation>
+                <div 
+                  class="info-modal-box" 
+                  on:click|stopPropagation
+                  on:keydown={(e) => e.key === 'Enter' && e.stopPropagation()}
+                  role="dialog"
+                  aria-modal="true"
+                >
                   <div class="info-modal-header">
                     <h3>Informação</h3>
                     <button class="info-modal-close" on:click={() => showInfoEquipamentos = false} aria-label="Fechar">×</button>
@@ -3429,7 +3435,13 @@
                 tabindex="-1"
                 aria-label="Fechar modal de informação"
               >
-                <div class="info-modal-box" on:click|stopPropagation>
+                <div 
+                  class="info-modal-box" 
+                  on:click|stopPropagation
+                  on:keydown={(e) => e.key === 'Enter' && e.stopPropagation()}
+                  role="dialog"
+                  aria-modal="true"
+                >
                   <div class="info-modal-header">
                     <h3>Informação</h3>
                     <button class="info-modal-close" on:click={() => showInfoPortas = false} aria-label="Fechar">×</button>
@@ -3534,7 +3546,13 @@
   >
     <!-- Mensagem de pop-up bloqueado sobreposta ao modal -->
     {#if showPopupInstructions}
-      <div class="popup-instructions-overlay" on:click|stopPropagation>
+      <div 
+        class="popup-instructions-overlay" 
+        on:click|stopPropagation
+        on:keydown={(e) => e.key === 'Enter' && e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+      >
         <div class="popup-instructions">
           <div class="popup-instructions-header">
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -3975,7 +3993,6 @@
                 addProjetista();
               }
             }}
-            autofocus
           />
         </div>
 
@@ -4027,7 +4044,6 @@
                 addTabulacao();
               }
             }}
-            autofocus
           />
         </div>
 
@@ -4245,32 +4261,6 @@
     cursor: not-allowed;
   }
 
-  .cto-search-button {
-    width: 100%;
-    padding: 0.75rem;
-    background: linear-gradient(135deg, #6495ED 0%, #7B9EE8 100%);
-    color: white;
-    border: none;
-    border-radius: 8px;
-    font-size: 1rem;
-    font-weight: 600;
-    cursor: pointer;
-    transition: all 0.3s;
-    box-shadow: 0 4px 6px rgba(100, 149, 237, 0.3);
-    margin-bottom: 0.75rem;
-  }
-
-  .cto-search-button:hover:not(:disabled) {
-    background: linear-gradient(135deg, #7B9EE8 0%, #9BB5F0 100%);
-    transform: translateY(-2px);
-    box-shadow: 0 6px 12px rgba(100, 149, 237, 0.4);
-  }
-
-  .cto-search-button:disabled {
-    background: #ccc;
-    cursor: not-allowed;
-  }
-
   .error-message {
     margin-top: 1rem;
     padding: 0.75rem;
@@ -4478,23 +4468,6 @@
     outline: 2px solid #7B68EE;
     outline-offset: 2px;
     border-radius: 50%;
-  }
-
-  .info-tooltip {
-    margin-top: 0.75rem;
-    padding: 0.75rem;
-    background: rgba(255, 255, 255, 0.98);
-    border: 1px solid #7B68EE;
-    border-radius: 6px;
-    font-size: 0.85rem;
-    line-height: 1.5;
-    color: #555;
-    box-shadow: 0 2px 8px rgba(123, 104, 238, 0.15);
-  }
-
-  .info-tooltip p {
-    margin: 0;
-    padding: 0;
   }
 
   .info-modal-overlay {
@@ -4840,11 +4813,6 @@
     justify-content: center;
     z-index: 10000;
     padding: 20px;
-  }
-
-  .confirm-overlay {
-    z-index: 10001 !important;
-    background: rgba(0, 0, 0, 0.7);
   }
 
   .modal-content {
