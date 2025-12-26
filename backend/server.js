@@ -1922,10 +1922,9 @@ app.put('/api/projetistas/:nome/name', async (req, res) => {
 
 // Função para validar estrutura do arquivo Excel (ultra-otimizada para não travar)
 // OTIMIZAÇÃO: Aceita tanto Buffer (memória) quanto caminho de arquivo (disco)
-// Função para processar Excel em STREAMING usando exceljs (para arquivos grandes)
-// Esta função processa linha por linha sem carregar tudo na memória
+// Função para processar Excel em STREAMING REAL usando exceljs (para arquivos grandes)
+// Esta função usa streaming reader que processa linha por linha SEM carregar arquivo na memória
 async function processExcelStreaming(filePath, supabaseClient) {
-  const workbook = new ExcelJS.Workbook();
   let totalRows = 0;
   let totalValid = 0;
   let totalInvalid = 0;
@@ -1933,6 +1932,8 @@ async function processExcelStreaming(filePath, supabaseClient) {
   const BATCH_SIZE = 1000; // Tamanho do lote para Supabase
   let currentBatch = [];
   let batchNumber = 0;
+  let headers = {};
+  let isFirstRow = true;
   
   // Função auxiliar para converter data
   const parseDate = (value) => {
@@ -1987,113 +1988,115 @@ async function processExcelStreaming(filePath, supabaseClient) {
   };
   
   try {
-    console.log('📖 [Streaming] Lendo arquivo Excel em modo streaming...');
+    console.log('📖 [Streaming] Lendo arquivo Excel em modo STREAMING REAL (sem carregar na memória)...');
     
-    // Ler workbook em modo streaming
-    await workbook.xlsx.readFile(filePath);
-    
-    if (workbook.worksheets.length === 0) {
-      throw new Error('Arquivo Excel não contém planilhas');
-    }
-    
-    const worksheet = workbook.worksheets[0];
-    const rowCount = worksheet.rowCount;
-    
-    if (rowCount <= 1) {
-      throw new Error('Arquivo Excel está vazio (apenas cabeçalho ou sem dados)');
-    }
-    
-    totalRows = rowCount - 1; // Excluir cabeçalho
-    console.log(`📊 [Streaming] Total de linhas no Excel: ${totalRows} (${rowCount} incluindo cabeçalho)`);
-    
-    // Obter cabeçalho (primeira linha)
-    const headerRow = worksheet.getRow(1);
-    const headers = {};
-    headerRow.eachCell((cell, colNumber) => {
-      const headerValue = cell.value ? String(cell.value).trim() : '';
-      if (headerValue) {
-        headers[colNumber] = normalizeKey(headerValue);
-      }
+    // Usar streaming reader do exceljs - NÃO carrega arquivo inteiro na memória
+    const stream = fs.createReadStream(filePath);
+    const workbookReader = new ExcelJS.stream.xlsx.WorkbookReader(stream, {
+      sharedStrings: 'cache', // Cache compartilhado para economizar memória
+      hyperlinks: 'ignore', // Ignorar hyperlinks
+      styles: 'ignore', // Ignorar estilos
+      worksheets: 'emit' // Emitir worksheets como streams
     });
     
-    console.log(`📋 [Streaming] Colunas detectadas: ${Object.keys(headers).length}`);
-    
-    // Processar linha por linha (começando da linha 2, pulando cabeçalho)
+    let worksheetReader = null;
     let processedRows = 0;
-    for (let rowNumber = 2; rowNumber <= rowCount; rowNumber++) {
-      const row = worksheet.getRow(rowNumber);
-      const rowData = {};
+    
+    // Processar workbook em streaming
+    for await (const worksheetReaderItem of workbookReader) {
+      worksheetReader = worksheetReaderItem;
+      console.log(`📋 [Streaming] Processando planilha: ${worksheetReader.name}`);
       
-      // Ler apenas células com valores
-      row.eachCell((cell, colNumber) => {
-        if (headers[colNumber] && cell.value !== null && cell.value !== undefined) {
-          rowData[headers[colNumber]] = cell.value;
-        }
-      });
-      
-      // Processar linha
-      try {
-        let lat = rowData.latitude;
-        let lng = rowData.longitude;
-        
-        // Converter coordenadas
-        if (typeof lat === 'string') {
-          lat = lat.replace(',', '.');
-          lat = parseFloat(lat);
-        }
-        if (typeof lng === 'string') {
-          lng = lng.replace(',', '.');
-          lng = parseFloat(lng);
+      // Processar cada linha do worksheet em streaming
+      for await (const row of worksheetReader) {
+        // Primeira linha = cabeçalho
+        if (isFirstRow) {
+          isFirstRow = false;
+          // Processar cabeçalho
+          row.eachCell((cell, colNumber) => {
+            const headerValue = cell.value ? String(cell.value).trim() : '';
+            if (headerValue) {
+              headers[colNumber] = normalizeKey(headerValue);
+            }
+          });
+          console.log(`📋 [Streaming] Colunas detectadas: ${Object.keys(headers).length}`);
+          continue; // Pular cabeçalho
         }
         
-        const cto = {
-          cid_rede: rowData.cid_rede || null,
-          estado: rowData.estado || null,
-          pop: rowData.pop || null,
-          olt: rowData.olt || null,
-          slot: rowData.slot || null,
-          pon: rowData.pon || null,
-          id_cto: rowData.id_cto || null,
-          cto: rowData.cto || null,
-          latitude: (lat && !isNaN(lat)) ? lat : null,
-          longitude: (lng && !isNaN(lng)) ? lng : null,
-          status_cto: rowData.status_cto || null,
-          data_cadastro: parseDate(rowData.data_cadastro),
-          portas: rowData.portas ? parseInt(rowData.portas) : null,
-          ocupado: rowData.ocupado ? parseInt(rowData.ocupado) : null,
-          livre: rowData.livre ? parseInt(rowData.livre) : null,
-          pct_ocup: rowData.pct_ocup ? parseFloat(rowData.pct_ocup) : null
-        };
+        // Processar linha de dados
+        totalRows++;
+        processedRows++;
         
-        // Validar coordenadas
-        if (cto.latitude && cto.longitude && 
-            !isNaN(cto.latitude) && !isNaN(cto.longitude) &&
-            cto.latitude >= -90 && cto.latitude <= 90 &&
-            cto.longitude >= -180 && cto.longitude <= 180) {
-          totalValid++;
-          currentBatch.push(cto);
+        try {
+          const rowData = {};
           
-          // Inserir lote quando atingir tamanho
-          if (currentBatch.length >= BATCH_SIZE) {
-            await insertBatch(currentBatch);
-            currentBatch = []; // Limpar batch
+          // Ler apenas células com valores
+          row.eachCell((cell, colNumber) => {
+            if (headers[colNumber] && cell.value !== null && cell.value !== undefined) {
+              rowData[headers[colNumber]] = cell.value;
+            }
+          });
+          
+          let lat = rowData.latitude;
+          let lng = rowData.longitude;
+          
+          // Converter coordenadas
+          if (typeof lat === 'string') {
+            lat = lat.replace(',', '.');
+            lat = parseFloat(lat);
           }
-        } else {
+          if (typeof lng === 'string') {
+            lng = lng.replace(',', '.');
+            lng = parseFloat(lng);
+          }
+          
+          const cto = {
+            cid_rede: rowData.cid_rede || null,
+            estado: rowData.estado || null,
+            pop: rowData.pop || null,
+            olt: rowData.olt || null,
+            slot: rowData.slot || null,
+            pon: rowData.pon || null,
+            id_cto: rowData.id_cto || null,
+            cto: rowData.cto || null,
+            latitude: (lat && !isNaN(lat)) ? lat : null,
+            longitude: (lng && !isNaN(lng)) ? lng : null,
+            status_cto: rowData.status_cto || null,
+            data_cadastro: parseDate(rowData.data_cadastro),
+            portas: rowData.portas ? parseInt(rowData.portas) : null,
+            ocupado: rowData.ocupado ? parseInt(rowData.ocupado) : null,
+            livre: rowData.livre ? parseInt(rowData.livre) : null,
+            pct_ocup: rowData.pct_ocup ? parseFloat(rowData.pct_ocup) : null
+          };
+          
+          // Validar coordenadas
+          if (cto.latitude && cto.longitude && 
+              !isNaN(cto.latitude) && !isNaN(cto.longitude) &&
+              cto.latitude >= -90 && cto.latitude <= 90 &&
+              cto.longitude >= -180 && cto.longitude <= 180) {
+            totalValid++;
+            currentBatch.push(cto);
+            
+            // Inserir lote quando atingir tamanho
+            if (currentBatch.length >= BATCH_SIZE) {
+              await insertBatch(currentBatch);
+              currentBatch = []; // Limpar batch
+              
+              // Forçar garbage collection após cada lote
+              if (global.gc) {
+                global.gc();
+              }
+            }
+          } else {
+            totalInvalid++;
+          }
+        } catch (rowErr) {
           totalInvalid++;
         }
-      } catch (rowErr) {
-        totalInvalid++;
-      }
-      
-      processedRows++;
-      
-      // Log de progresso a cada 10000 linhas
-      if (processedRows % 10000 === 0) {
-        console.log(`📊 [Streaming] Progresso: ${processedRows}/${totalRows} linhas processadas (${totalValid} válidas, ${totalInvalid} inválidas)`);
         
-        // Forçar garbage collection periodicamente
-        if (global.gc) {
-          global.gc();
+        // Log de progresso a cada 10000 linhas
+        if (processedRows % 10000 === 0) {
+          console.log(`📊 [Streaming] Progresso: ${processedRows} linhas processadas (${totalValid} válidas, ${totalInvalid} inválidas)`);
         }
       }
     }
@@ -2103,7 +2106,7 @@ async function processExcelStreaming(filePath, supabaseClient) {
       await insertBatch(currentBatch);
     }
     
-    console.log(`📊 [Streaming] Processamento concluído: ${totalValid} válidas, ${totalInvalid} inválidas`);
+    console.log(`📊 [Streaming] Processamento concluído: ${totalRows} linhas, ${totalValid} válidas, ${totalInvalid} inválidas`);
     console.log(`✅ [Streaming] ${importedRows} CTOs importadas no Supabase`);
     
     return {
