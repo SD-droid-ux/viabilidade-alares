@@ -412,36 +412,90 @@ async function readCTOsFromSupabase() {
     console.log('📂 [Supabase] ===== CARREGANDO CTOs DO SUPABASE =====');
     console.log('📂 [Supabase] Verificando conexão e disponibilidade...');
     
-    const { data, error } = await supabase
+    // Primeiro, contar quantas CTOs existem
+    const { count, error: countError } = await supabase
       .from('ctos')
-      .select('*')
-      .order('created_at', { ascending: false });
+      .select('*', { count: 'exact', head: true });
     
-    if (error) {
-      console.error('❌ [Supabase] Erro ao ler CTOs:', error);
-      console.error('❌ [Supabase] Código do erro:', error.code);
-      console.error('❌ [Supabase] Mensagem:', error.message);
-      if (error.details) {
-        console.error('❌ [Supabase] Detalhes:', error.details);
-      }
-      if (error.hint) {
-        console.error('❌ [Supabase] Dica:', error.hint);
-      }
+    if (countError) {
+      console.error('❌ [Supabase] Erro ao contar CTOs:', countError);
       return null; // Fallback para Excel
     }
     
-    if (!data || data.length === 0) {
+    console.log(`📊 [Supabase] Total de CTOs no banco: ${count || 0}`);
+    
+    if (!count || count === 0) {
       console.log('⚠️ [Supabase] Nenhuma CTO encontrada no Supabase (retornando array vazio)');
       console.log('⚠️ [Supabase] Isso indica que Supabase está funcionando, mas a tabela está vazia');
       return []; // Retornar array vazio (não null) para indicar que Supabase está funcionando, mas vazio
     }
     
-    console.log(`📊 [Supabase] ${data.length} CTOs encontradas no Supabase`);
+    // Buscar TODOS os registros usando paginação
+    // Supabase tem limite de 1000 registros por query, então precisamos paginar
+    const BATCH_SIZE = 1000; // Tamanho do lote (máximo do Supabase)
+    let allData = [];
+    let offset = 0;
+    let hasMore = true;
+    let batchNumber = 0;
+    
+    console.log(`📥 [Supabase] Buscando ${count} CTOs em lotes de ${BATCH_SIZE}...`);
+    
+    while (hasMore) {
+      batchNumber++;
+      console.log(`📥 [Supabase] Buscando lote ${batchNumber} (offset: ${offset}, limite: ${BATCH_SIZE})...`);
+      
+      const { data, error } = await supabase
+        .from('ctos')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .range(offset, offset + BATCH_SIZE - 1); // range é inclusivo: [offset, offset + BATCH_SIZE - 1]
+      
+      if (error) {
+        console.error(`❌ [Supabase] Erro ao buscar lote ${batchNumber}:`, error);
+        console.error('❌ [Supabase] Código do erro:', error.code);
+        console.error('❌ [Supabase] Mensagem:', error.message);
+        if (error.details) {
+          console.error('❌ [Supabase] Detalhes:', error.details);
+        }
+        if (error.hint) {
+          console.error('❌ [Supabase] Dica:', error.hint);
+        }
+        // Se houver erro, retornar o que já foi carregado (se houver) ou null
+        if (allData.length > 0) {
+          console.warn(`⚠️ [Supabase] Erro ao buscar lote ${batchNumber}, retornando ${allData.length} CTOs já carregadas`);
+          break; // Retornar dados parciais
+        }
+        return null; // Fallback para Excel
+      }
+      
+      if (!data || data.length === 0) {
+        hasMore = false;
+        break;
+      }
+      
+      allData = allData.concat(data);
+      console.log(`✅ [Supabase] Lote ${batchNumber} carregado: ${data.length} CTOs (total acumulado: ${allData.length})`);
+      
+      // Se retornou menos que o tamanho do lote, não há mais dados
+      if (data.length < BATCH_SIZE) {
+        hasMore = false;
+        break;
+      }
+      
+      offset += BATCH_SIZE;
+      
+      // Log de progresso a cada 10 lotes
+      if (batchNumber % 10 === 0) {
+        console.log(`📊 [Supabase] Progresso: ${allData.length} / ${count} CTOs carregadas (${Math.round((allData.length / count) * 100)}%)`);
+      }
+    }
+    
+    console.log(`✅ [Supabase] ${allData.length} CTOs carregadas do Supabase (de ${count} total)`);
     console.log('📊 [Supabase] Convertendo dados para formato Excel...');
     
     // Converter para formato Excel (mesma estrutura do arquivo)
     // IMPORTANTE: Garantir que valores numéricos sejam convertidos corretamente
-    const excelData = (data || []).map((row, index) => {
+    const excelData = (allData || []).map((row, index) => {
       // Converter latitude e longitude (críticos para o frontend)
       let latitude = row.latitude;
       if (latitude !== null && latitude !== undefined) {
