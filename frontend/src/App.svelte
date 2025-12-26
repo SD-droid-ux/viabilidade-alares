@@ -275,13 +275,18 @@
       }
 
       const arrayBuffer = await response.arrayBuffer();
+      console.log('📥 [Frontend] Arquivo Excel recebido:', arrayBuffer.byteLength, 'bytes');
+      
       const workbook = XLSX.read(arrayBuffer, { type: 'array' });
       const sheetName = workbook.SheetNames[0];
       const worksheet = workbook.Sheets[sheetName];
       const data = XLSX.utils.sheet_to_json(worksheet);
       
+      console.log('📊 [Frontend] Total de linhas no Excel:', data.length);
+      
       // Verificar se há dados válidos
       if (!data || data.length === 0) {
+        console.error('❌ [Frontend] Base de dados vazia ou inválida');
         baseDataExists = false;
         throw new Error('Base de dados vazia ou inválida');
       }
@@ -298,16 +303,27 @@
         return normalized;
       });
 
+      console.log('📋 [Frontend] Colunas detectadas:', Object.keys(normalizedData[0] || {}));
+
       // Mapear colunas do Excel para o formato esperado
       const ctos = [];
+      let skippedNoCoords = 0;
+      let skippedInvalidCoords = 0;
+      
       for (const row of normalizedData) {
         // Identificar latitude e longitude (obrigatórias para funcionamento)
         let lat = parseFloat(row.latitude || row.lat);
         let lng = parseFloat(row.longitude || row.long);
 
         // Pular apenas se não tiver coordenadas válidas (coordenadas são críticas)
-        if (isNaN(lat) || isNaN(lng)) continue;
-        if (lat < -90 || lat > 90 || lng < -180 || lng > 180) continue;
+        if (isNaN(lat) || isNaN(lng)) {
+          skippedNoCoords++;
+          continue;
+        }
+        if (lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+          skippedInvalidCoords++;
+          continue;
+        }
 
         // Identificar nome da CTO (opcional - pode estar vazio)
         let nome = row.cto || row.id_cto || row.nome || '';
@@ -341,11 +357,17 @@
         });
       }
 
+      console.log(`✅ [Frontend] CTOs processadas: ${ctos.length} válidas`);
+      console.log(`⚠️ [Frontend] Linhas ignoradas: ${skippedNoCoords} sem coordenadas, ${skippedInvalidCoords} coordenadas inválidas`);
       
       // Verificar se pelo menos uma CTO foi carregada
       if (ctos.length === 0) {
+        console.error('❌ [Frontend] Nenhuma CTO válida foi carregada!');
+        console.error('❌ [Frontend] Total de linhas:', data.length);
+        console.error('❌ [Frontend] Linhas ignoradas:', skippedNoCoords + skippedInvalidCoords);
         baseDataExists = false;
       } else {
+        console.log(`✅ [Frontend] Base de dados carregada com sucesso: ${ctos.length} CTOs`);
         baseDataExists = true;
       }
       
