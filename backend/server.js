@@ -626,7 +626,7 @@ app.get('/api/ctos/nearby', async (req, res) => {
     
     const lat = parseFloat(req.query.lat);
     const lng = parseFloat(req.query.lng);
-    const radiusMeters = parseFloat(req.query.radius || 1000); // Default 1km (garante que pegamos as de 250m)
+    const radiusMeters = parseFloat(req.query.radius || 350); // Default 350m (margem para distância real via ruas)
     
     if (isNaN(lat) || isNaN(lng)) {
       return res.status(400).json({ error: 'Latitude e longitude são obrigatórios' });
@@ -690,7 +690,7 @@ app.get('/api/ctos/nearby', async (req, res) => {
           })
           .filter(cto => cto.distancia_metros <= radiusMeters)
           .sort((a, b) => a.distancia_metros - b.distancia_metros)
-          .slice(0, 10); // Limitar a 10 CTOs mais próximas
+          .slice(0, 5); // Limitar a 5 CTOs mais próximas (mesmo número usado no frontend)
         
         console.log(`✅ [API] ${nearbyCTOs.length} CTOs encontradas próximas (de ${data?.length || 0} na bounding box)`);
         
@@ -1821,41 +1821,65 @@ async function getNextVIALAFromSupabase() {
       console.log(`✅ [Supabase] Próximo VI ALA gerado: ${nextVIALA} (número: ${nextNumber})`);
       return nextVIALA;
     } catch (rpcError) {
-      // Fallback: buscar manualmente o máximo
-      console.log('⚠️ [Supabase] Função SQL não disponível, buscando manualmente...');
+      // Fallback: buscar manualmente TODOS os registros para encontrar o maior número
+      console.log('⚠️ [Supabase] Função SQL não disponível, buscando manualmente TODOS os registros...');
       
-      const { data, error } = await supabase
-        .from('vi_ala')
-        .select('vi_ala')
-        .order('created_at', { ascending: false })
-        .limit(100); // Limitar para performance
-      
-      if (error) {
-        console.error('❌ [Supabase] Erro ao buscar VI ALAs:', error);
-        return null;
-      }
-      
-      // Encontrar maior número
+      // Buscar todos os registros em lotes para garantir que pegamos o maior número
       let maxNumber = 0;
-      if (data && data.length > 0) {
-        for (const row of data) {
-          const viAla = row.vi_ala || '';
-          if (viAla && typeof viAla === 'string') {
-            const match = viAla.match(/VI\s*ALA[-\s]*(\d+)/i);
-            if (match) {
-              const number = parseInt(match[1], 10);
-              if (!isNaN(number) && number > maxNumber) {
-                maxNumber = number;
+      let offset = 0;
+      const BATCH_SIZE = 1000;
+      let hasMore = true;
+      let totalProcessed = 0;
+      
+      // Primeiro, contar total de registros para saber quantos processar
+      const { count: totalCount } = await supabase
+        .from('vi_ala')
+        .select('*', { count: 'exact', head: true });
+      
+      console.log(`📊 [Supabase] Total de VI ALAs no banco: ${totalCount || 0}`);
+      
+      while (hasMore) {
+        const { data, error } = await supabase
+          .from('vi_ala')
+          .select('vi_ala')
+          .order('created_at', { ascending: false })
+          .range(offset, offset + BATCH_SIZE - 1);
+        
+        if (error) {
+          console.error('❌ [Supabase] Erro ao buscar VI ALAs:', error);
+          break;
+        }
+        
+        // Processar lote atual
+        if (data && data.length > 0) {
+          for (const row of data) {
+            const viAla = row.vi_ala || '';
+            if (viAla && typeof viAla === 'string') {
+              // Extrair número do VI ALA (formato: "VI ALA-0000001" ou "VI ALA - 0000001")
+              const match = viAla.match(/VI\s*ALA[-\s]*(\d+)/i);
+              if (match) {
+                const number = parseInt(match[1], 10);
+                if (!isNaN(number) && number > maxNumber) {
+                  maxNumber = number;
+                }
               }
             }
           }
+          totalProcessed += data.length;
+        }
+        
+        // Verificar se há mais registros
+        if (!data || data.length < BATCH_SIZE) {
+          hasMore = false;
+        } else {
+          offset += BATCH_SIZE;
         }
       }
       
       const nextNumber = maxNumber + 1;
       const nextVIALA = `VI ALA-${String(nextNumber).padStart(7, '0')}`;
       
-      console.log(`✅ [Supabase] Próximo VI ALA gerado: ${nextVIALA} (max: ${maxNumber}, próximo: ${nextNumber})`);
+      console.log(`✅ [Supabase] Próximo VI ALA gerado: ${nextVIALA} (max encontrado: ${maxNumber}, próximo: ${nextNumber}, registros processados: ${totalProcessed}/${totalCount || 0})`);
       return nextVIALA;
     }
   } catch (err) {
@@ -3823,23 +3847,35 @@ app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
-// Rota para obter próximo VI ALA
+// Rota para obter próximo VI ALA (busca o mais recente no Supabase e retorna próximo)
 app.get('/api/vi-ala/next', async (req, res) => {
   const requestStartTime = Date.now();
+  
+  // Garantir headers CORS
+  const origin = req.headers.origin;
+  if (origin) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+  } else {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+  }
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
+  res.setHeader('Content-Type', 'application/json');
+  
   console.log('📥 [API] ===== REQUISIÇÃO RECEBIDA /api/vi-ala/next =====');
   console.log('📥 [API] Timestamp:', new Date().toISOString());
   
-  // Responder imediatamente com headers para evitar timeout
-  res.setHeader('Content-Type', 'application/json');
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  
   try {
-    console.log('⏱️ [API] Iniciando processamento...');
+    console.log('⏱️ [API] Buscando próximo VI ALA do Supabase...');
     
+    // Buscar próximo VI ALA (tenta Supabase primeiro, fallback Excel)
     const nextVIALA = await getNextVIALA();
     
+    if (!nextVIALA) {
+      throw new Error('Não foi possível gerar próximo VI ALA');
+    }
+    
     const elapsedTime = Date.now() - requestStartTime;
-    console.log(`✅ [API] Resposta enviada: ${nextVIALA} (${elapsedTime}ms)`);
+    console.log(`✅ [API] Próximo VI ALA gerado: ${nextVIALA} (${elapsedTime}ms)`);
     
     if (!res.headersSent) {
       res.json({ success: true, viAla: nextVIALA });
@@ -3849,22 +3885,38 @@ app.get('/api/vi-ala/next', async (req, res) => {
     console.error(`❌ [API] Erro (${elapsedTime}ms):`, err.message);
     console.error('❌ [API] Stack:', err.stack);
     
+    // Garantir headers CORS mesmo em erro
+    if (origin) {
+      res.setHeader('Access-Control-Allow-Origin', origin);
+    } else {
+      res.setHeader('Access-Control-Allow-Origin', '*');
+    }
+    
     if (!res.headersSent) {
       res.status(500).json({ success: false, error: err.message });
     }
   }
 });
 
-// Rota para salvar registro na base_VI_ALA.xlsx
+// Rota para salvar registro VI ALA (Supabase primeiro, fallback Excel)
 app.post('/api/vi-ala/save', async (req, res) => {
   try {
-    console.log('📥 Requisição recebida para salvar VI ALA');
-    console.log('📦 Body recebido:', req.body);
+    // Garantir headers CORS
+    const origin = req.headers.origin;
+    if (origin) {
+      res.setHeader('Access-Control-Allow-Origin', origin);
+    } else {
+      res.setHeader('Access-Control-Allow-Origin', '*');
+    }
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+    
+    console.log('📥 [API] Requisição recebida para salvar VI ALA');
+    console.log('📦 [API] Body recebido:', req.body);
     
     const { viAla, ala, data, projetista, cidade, endereco, latitude, longitude } = req.body;
     
     if (!viAla || viAla.trim() === '') {
-      console.warn('⚠️ VI ALA não fornecido ou vazio');
+      console.warn('⚠️ [API] VI ALA não fornecido ou vazio');
       return res.status(400).json({ success: false, error: 'VI ALA é obrigatório' });
     }
     
@@ -3879,14 +3931,28 @@ app.post('/api/vi-ala/save', async (req, res) => {
       'LONGITUDE': longitude || ''
     };
     
-    console.log('💾 Salvando registro:', record);
+    console.log('💾 [API] Salvando registro:', record);
+    
+    // Salvar (tenta Supabase primeiro, fallback Excel)
     await saveVIALARecord(record);
-    console.log('✅ Registro salvo com sucesso');
+    
+    console.log('✅ [API] Registro salvo com sucesso');
     res.json({ success: true, message: 'Registro salvo com sucesso' });
   } catch (err) {
-    console.error('❌ Erro ao salvar registro VI ALA:', err);
-    console.error('❌ Stack trace:', err.stack);
-    res.status(500).json({ success: false, error: err.message });
+    console.error('❌ [API] Erro ao salvar registro VI ALA:', err);
+    console.error('❌ [API] Stack trace:', err.stack);
+    
+    // Garantir headers CORS mesmo em erro
+    const origin = req.headers.origin;
+    if (origin) {
+      res.setHeader('Access-Control-Allow-Origin', origin);
+    } else {
+      res.setHeader('Access-Control-Allow-Origin', '*');
+    }
+    
+    if (!res.headersSent) {
+      res.status(500).json({ success: false, error: err.message });
+    }
   }
 });
 
