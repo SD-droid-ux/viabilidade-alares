@@ -1386,10 +1386,10 @@
 
     try {
       // NOVA ABORDAGEM: Buscar CTOs próximas via API (muito mais eficiente!)
-      // Busca apenas CTOs dentro de 1km (garante que pegamos as de 250m)
+      // Busca CTOs dentro de 350m linear (margem para distância real via ruas ser um pouco maior)
       console.log(`🔍 [Frontend] Buscando CTOs próximas de (${clientCoords.lat}, ${clientCoords.lng})...`);
       
-      const response = await fetch(getApiUrl(`/api/ctos/nearby?lat=${clientCoords.lat}&lng=${clientCoords.lng}&radius=1000`));
+      const response = await fetch(getApiUrl(`/api/ctos/nearby?lat=${clientCoords.lat}&lng=${clientCoords.lng}&radius=350`));
       
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
@@ -1399,12 +1399,12 @@
       const data = await response.json();
       
       if (!data.success || !data.ctos || data.ctos.length === 0) {
-        error = 'Nenhuma CTO encontrada dentro de 1km de distância';
+        error = 'Nenhuma CTO encontrada próxima ao endereço';
         loadingCTOs = false;
         return;
       }
       
-      // Filtrar apenas CTOs dentro de 250m (a API retorna até 1km para garantir)
+      // Filtrar apenas CTOs dentro de 250m linear (antes de calcular distância real via ruas)
       const validCTOs = data.ctos
         .filter(cto => cto.distancia_metros <= 250)
         .map(cto => ({
