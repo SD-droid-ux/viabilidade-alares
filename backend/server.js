@@ -674,16 +674,37 @@ app.get('/api/base.xlsx', async (req, res) => {
           return;
         }
         
-        // Configurar headers para streaming
-        res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-        res.setHeader('Content-Disposition', 'attachment; filename="base.xlsx"');
+        // IMPORTANTE: ExcelJS mantém TODAS as linhas em memória até escrever
+        // Para evitar erro de memória com 217k+ registros, precisamos usar uma abordagem diferente
+        // Solução: Escrever para arquivo temporário usando streaming do ExcelJS, depois servir o arquivo
         
-        // Criar workbook Excel em streaming usando exceljs
-        const workbook = new ExcelJS.Workbook();
-        const worksheet = workbook.addWorksheet('CTOs');
+        const BATCH_SIZE = 1000; // Batch size otimizado
+        let offset = 0;
+        let hasMore = true;
+        let batchNumber = 0;
+        let totalProcessed = 0;
         
-        // Definir cabeçalhos
-        worksheet.columns = [
+        console.log(`📥 [Supabase] Buscando ${count} CTOs em lotes de ${BATCH_SIZE} e gerando Excel...`);
+        
+        // Criar arquivo temporário para escrita em streaming
+        const tempExcelPath = path.join(DATA_DIR, 'temp', `base_export_${Date.now()}.xlsx`);
+        const tempDir = path.dirname(tempExcelPath);
+        if (!fs.existsSync(tempDir)) {
+          fs.mkdirSync(tempDir, { recursive: true });
+        }
+        
+        // Criar stream writer para escrever Excel em streaming (reduz uso de memória)
+        const stream = fs.createWriteStream(tempExcelPath);
+        const streamWriter = new ExcelJS.stream.xlsx.WorkbookWriter({
+          stream: stream,
+          useStyles: false,
+          useSharedStrings: false
+        });
+        
+        const exportWorksheet = streamWriter.addWorksheet('CTOs');
+        
+        // Adicionar cabeçalhos
+        exportWorksheet.columns = [
           { header: 'CID_REDE', key: 'cid_rede', width: 15 },
           { header: 'ESTADO', key: 'estado', width: 10 },
           { header: 'POP', key: 'pop', width: 15 },
@@ -702,145 +723,127 @@ app.get('/api/base.xlsx', async (req, res) => {
           { header: 'PCT_OCUP', key: 'pct_ocup', width: 12 }
         ];
         
-        // Buscar dados do Supabase em lotes e adicionar diretamente ao Excel
-        // NÃO carrega todos os dados na memória de uma vez
-        const BATCH_SIZE = 1000; // Tamanho do lote do Supabase
-        let offset = 0;
-        let hasMore = true;
-        let batchNumber = 0;
-        let totalProcessed = 0;
+        // Função auxiliar para converter tipos
+        const convertValue = (value, type = 'string') => {
+          if (value === null || value === undefined) return '';
+          if (type === 'number') {
+            const num = typeof value === 'number' ? value : parseFloat(value);
+            return isNaN(num) ? '' : num;
+          }
+          if (type === 'int') {
+            const num = typeof value === 'number' ? value : parseInt(value);
+            return isNaN(num) ? '' : num;
+          }
+          if (type === 'date') {
+            if (value instanceof Date) {
+              return value.toISOString().split('T')[0];
+            }
+            return String(value);
+          }
+          return String(value || '');
+        };
         
-        console.log(`📥 [Supabase] Buscando ${count} CTOs em lotes de ${BATCH_SIZE} e gerando Excel em streaming...`);
-        
-        while (hasMore) {
-          batchNumber++;
-          
-          // Buscar lote do Supabase
-          const { data, error } = await supabase
-            .from('ctos')
-            .select('*')
-            .order('created_at', { ascending: false })
-            .range(offset, offset + BATCH_SIZE - 1);
-          
-          if (error) {
-            console.error(`❌ [Supabase] Erro ao buscar lote ${batchNumber}:`, error);
-            throw error;
+        try {
+          while (hasMore) {
+            batchNumber++;
+            
+            // Buscar lote do Supabase
+            const { data, error } = await supabase
+              .from('ctos')
+              .select('*')
+              .order('created_at', { ascending: false })
+              .range(offset, offset + BATCH_SIZE - 1);
+            
+            if (error) {
+              console.error(`❌ [Supabase] Erro ao buscar lote ${batchNumber}:`, error);
+              throw error;
+            }
+            
+            if (!data || data.length === 0) {
+              hasMore = false;
+              break;
+            }
+            
+            // Converter e adicionar lote ao worksheet (streaming real)
+            for (const row of data) {
+              exportWorksheet.addRow({
+                cid_rede: convertValue(row.cid_rede),
+                estado: convertValue(row.estado),
+                pop: convertValue(row.pop),
+                olt: convertValue(row.olt),
+                slot: convertValue(row.slot),
+                pon: convertValue(row.pon),
+                id_cto: convertValue(row.id_cto),
+                cto: convertValue(row.cto),
+                latitude: convertValue(row.latitude, 'number'),
+                longitude: convertValue(row.longitude, 'number'),
+                status_cto: convertValue(row.status_cto),
+                data_cadastro: convertValue(row.data_cadastro, 'date'),
+                portas: convertValue(row.portas, 'int'),
+                ocupado: convertValue(row.ocupado, 'int'),
+                livre: convertValue(row.livre, 'int'),
+                pct_ocup: convertValue(row.pct_ocup, 'number')
+              });
+            }
+            
+            totalProcessed += data.length;
+            
+            // Log de progresso a cada 20 lotes
+            if (batchNumber % 20 === 0 || totalProcessed === count) {
+              const memUsage = process.memoryUsage();
+              const memMB = Math.round(memUsage.heapUsed / 1024 / 1024);
+              console.log(`📊 [Supabase] Progresso: ${totalProcessed} / ${count} CTOs (${Math.round((totalProcessed / count) * 100)}%) | Memória: ${memMB}MB`);
+            }
+            
+            // Se retornou menos que o tamanho do lote, não há mais dados
+            if (data.length < BATCH_SIZE) {
+              hasMore = false;
+              break;
+            }
+            
+            offset += BATCH_SIZE;
+            
+            // GC a cada 50 lotes
+            if (global.gc && batchNumber % 50 === 0) {
+              global.gc();
+            }
           }
           
-          if (!data || data.length === 0) {
-            hasMore = false;
-            break;
-          }
+          // Finalizar stream writer
+          await streamWriter.commit();
           
-          // Converter e adicionar lote ao worksheet (processa em memória apenas o lote atual)
-          data.forEach(row => {
-            // Converter tipos (mesma lógica da função readCTOsFromSupabase)
-            let latitude = row.latitude;
-            if (latitude !== null && latitude !== undefined) {
-              latitude = typeof latitude === 'number' ? latitude : parseFloat(latitude);
-              if (isNaN(latitude)) latitude = '';
-            } else {
-              latitude = '';
+        console.log(`✅ [Supabase] Excel gerado: ${totalProcessed} CTOs`);
+        
+        // Configurar headers antes de servir arquivo
+        res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        res.setHeader('Content-Disposition', 'attachment; filename="base.xlsx"');
+        
+        // Servir arquivo do disco (streaming real)
+        res.sendFile(path.resolve(tempExcelPath), (err) => {
+          // Limpar arquivo temporário após envio
+          if (err) {
+            console.error('❌ [Supabase] Erro ao enviar arquivo:', err);
+          }
+          // Deletar arquivo temporário em background (não bloquear)
+          fs.unlink(tempExcelPath, (unlinkErr) => {
+            if (unlinkErr) {
+              console.warn('⚠️ [Supabase] Erro ao deletar arquivo temporário:', unlinkErr.message);
             }
-            
-            let longitude = row.longitude;
-            if (longitude !== null && longitude !== undefined) {
-              longitude = typeof longitude === 'number' ? longitude : parseFloat(longitude);
-              if (isNaN(longitude)) longitude = '';
-            } else {
-              longitude = '';
-            }
-            
-            let portas = row.portas;
-            if (portas !== null && portas !== undefined) {
-              portas = typeof portas === 'number' ? portas : parseInt(portas);
-              if (isNaN(portas)) portas = '';
-            } else {
-              portas = '';
-            }
-            
-            let ocupado = row.ocupado;
-            if (ocupado !== null && ocupado !== undefined) {
-              ocupado = typeof ocupado === 'number' ? ocupado : parseInt(ocupado);
-              if (isNaN(ocupado)) ocupado = '';
-            } else {
-              ocupado = '';
-            }
-            
-            let livre = row.livre;
-            if (livre !== null && livre !== undefined) {
-              livre = typeof livre === 'number' ? livre : parseInt(livre);
-              if (isNaN(livre)) livre = '';
-            } else {
-              livre = '';
-            }
-            
-            let pct_ocup = row.pct_ocup;
-            if (pct_ocup !== null && pct_ocup !== undefined) {
-              pct_ocup = typeof pct_ocup === 'number' ? pct_ocup : parseFloat(pct_ocup);
-              if (isNaN(pct_ocup)) pct_ocup = '';
-            } else {
-              pct_ocup = '';
-            }
-            
-            let data_cadastro = row.data_cadastro;
-            if (data_cadastro !== null && data_cadastro !== undefined) {
-              if (data_cadastro instanceof Date) {
-                data_cadastro = data_cadastro.toISOString().split('T')[0];
-              } else if (typeof data_cadastro === 'string') {
-                data_cadastro = data_cadastro;
-              } else {
-                data_cadastro = String(data_cadastro);
-              }
-            } else {
-              data_cadastro = '';
-            }
-            
-            // Adicionar linha ao worksheet
-            worksheet.addRow({
-              cid_rede: row.cid_rede ? String(row.cid_rede) : '',
-              estado: row.estado ? String(row.estado) : '',
-              pop: row.pop ? String(row.pop) : '',
-              olt: row.olt ? String(row.olt) : '',
-              slot: row.slot ? String(row.slot) : '',
-              pon: row.pon ? String(row.pon) : '',
-              id_cto: row.id_cto ? String(row.id_cto) : '',
-              cto: row.cto ? String(row.cto) : '',
-              latitude: latitude !== '' ? latitude : '',
-              longitude: longitude !== '' ? longitude : '',
-              status_cto: row.status_cto ? String(row.status_cto) : '',
-              data_cadastro: data_cadastro,
-              portas: portas !== '' ? portas : '',
-              ocupado: ocupado !== '' ? ocupado : '',
-              livre: livre !== '' ? livre : '',
-              pct_ocup: pct_ocup !== '' ? pct_ocup : ''
-            });
           });
-          
-          totalProcessed += data.length;
-          
-          // Log de progresso
-          if (batchNumber % 10 === 0 || totalProcessed === count) {
-            console.log(`📊 [Supabase] Progresso: ${totalProcessed} / ${count} CTOs processadas (${Math.round((totalProcessed / count) * 100)}%)`);
-          }
-          
-          // Se retornou menos que o tamanho do lote, não há mais dados
-          if (data.length < BATCH_SIZE) {
-            hasMore = false;
-            break;
-          }
-          
-          offset += BATCH_SIZE;
-          
-          // Forçar garbage collection a cada 10 lotes (para liberar memória)
-          if (global.gc && batchNumber % 10 === 0) {
-            global.gc();
-          }
-        }
+        });
         
-        // Escrever Excel diretamente na resposta HTTP (streaming)
-        console.log(`✅ [Supabase] Gerando Excel final com ${totalProcessed} CTOs...`);
-        await workbook.xlsx.write(res);
+        return;
+        } catch (streamErr) {
+          // Limpar arquivo temporário em caso de erro
+          try {
+            if (fs.existsSync(tempExcelPath)) {
+              fs.unlinkSync(tempExcelPath);
+            }
+          } catch (cleanupErr) {
+            console.warn('⚠️ [Supabase] Erro ao limpar arquivo temporário:', cleanupErr.message);
+          }
+          throw streamErr;
+        }
         
         console.log(`✅ [Supabase] Excel gerado e enviado via streaming: ${totalProcessed} CTOs`);
         return;
