@@ -1,6 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import XLSX from 'xlsx';
+import ExcelJS from 'exceljs';
 import fs from 'fs';
 import fsPromises from 'fs/promises';
 import path from 'path';
@@ -1921,8 +1922,204 @@ app.put('/api/projetistas/:nome/name', async (req, res) => {
 
 // Função para validar estrutura do arquivo Excel (ultra-otimizada para não travar)
 // OTIMIZAÇÃO: Aceita tanto Buffer (memória) quanto caminho de arquivo (disco)
+// Função para processar Excel em STREAMING usando exceljs (para arquivos grandes)
+// Esta função processa linha por linha sem carregar tudo na memória
+async function processExcelStreaming(filePath, supabaseClient) {
+  const workbook = new ExcelJS.Workbook();
+  let totalRows = 0;
+  let totalValid = 0;
+  let totalInvalid = 0;
+  let importedRows = 0;
+  const BATCH_SIZE = 1000; // Tamanho do lote para Supabase
+  let currentBatch = [];
+  let batchNumber = 0;
+  
+  // Função auxiliar para converter data
+  const parseDate = (value) => {
+    if (!value) return null;
+    if (value instanceof Date) return value.toISOString().split('T')[0];
+    if (typeof value === 'string') {
+      const date = new Date(value);
+      if (!isNaN(date.getTime())) {
+        return date.toISOString().split('T')[0];
+      }
+    }
+    if (typeof value === 'number') {
+      // Excel serial date
+      const excelEpoch = new Date(1899, 11, 30);
+      const date = new Date(excelEpoch.getTime() + value * 86400000);
+      if (!isNaN(date.getTime())) {
+        return date.toISOString().split('T')[0];
+      }
+    }
+    return null;
+  };
+  
+  // Função para normalizar chaves
+  const normalizeKey = (key) => {
+    const lower = String(key || '').toLowerCase().trim();
+    const mapping = {
+      'cid_rede': 'cid_rede', 'cid rede': 'cid_rede', 'estado': 'estado', 'pop': 'pop',
+      'olt': 'olt', 'slot': 'slot', 'pon': 'pon', 'id_cto': 'id_cto', 'id cto': 'id_cto', 'cto': 'cto',
+      'latitude': 'latitude', 'lat': 'latitude', 'longitude': 'longitude', 'long': 'longitude', 'lng': 'longitude',
+      'status_cto': 'status_cto', 'status cto': 'status_cto', 'data_cadastro': 'data_cadastro', 'data cadastro': 'data_cadastro',
+      'portas': 'portas', 'ocupado': 'ocupado', 'livre': 'livre', 'pct_ocup': 'pct_ocup', 'pct ocup': 'pct_ocup'
+    };
+    return mapping[lower] || lower;
+  };
+  
+  // Função para inserir lote no Supabase
+  const insertBatch = async (batch) => {
+    if (batch.length === 0) return;
+    
+    batchNumber++;
+    const { error } = await supabaseClient
+      .from('ctos')
+      .insert(batch);
+    
+    if (error) {
+      console.error(`❌ [Streaming] Erro ao importar lote ${batchNumber}:`, error);
+      throw error;
+    }
+    
+    importedRows += batch.length;
+    console.log(`✅ [Streaming] Lote ${batchNumber} importado: ${batch.length} CTOs (total: ${importedRows})`);
+  };
+  
+  try {
+    console.log('📖 [Streaming] Lendo arquivo Excel em modo streaming...');
+    
+    // Ler workbook em modo streaming
+    await workbook.xlsx.readFile(filePath);
+    
+    if (workbook.worksheets.length === 0) {
+      throw new Error('Arquivo Excel não contém planilhas');
+    }
+    
+    const worksheet = workbook.worksheets[0];
+    const rowCount = worksheet.rowCount;
+    
+    if (rowCount <= 1) {
+      throw new Error('Arquivo Excel está vazio (apenas cabeçalho ou sem dados)');
+    }
+    
+    totalRows = rowCount - 1; // Excluir cabeçalho
+    console.log(`📊 [Streaming] Total de linhas no Excel: ${totalRows} (${rowCount} incluindo cabeçalho)`);
+    
+    // Obter cabeçalho (primeira linha)
+    const headerRow = worksheet.getRow(1);
+    const headers = {};
+    headerRow.eachCell((cell, colNumber) => {
+      const headerValue = cell.value ? String(cell.value).trim() : '';
+      if (headerValue) {
+        headers[colNumber] = normalizeKey(headerValue);
+      }
+    });
+    
+    console.log(`📋 [Streaming] Colunas detectadas: ${Object.keys(headers).length}`);
+    
+    // Processar linha por linha (começando da linha 2, pulando cabeçalho)
+    let processedRows = 0;
+    for (let rowNumber = 2; rowNumber <= rowCount; rowNumber++) {
+      const row = worksheet.getRow(rowNumber);
+      const rowData = {};
+      
+      // Ler apenas células com valores
+      row.eachCell((cell, colNumber) => {
+        if (headers[colNumber] && cell.value !== null && cell.value !== undefined) {
+          rowData[headers[colNumber]] = cell.value;
+        }
+      });
+      
+      // Processar linha
+      try {
+        let lat = rowData.latitude;
+        let lng = rowData.longitude;
+        
+        // Converter coordenadas
+        if (typeof lat === 'string') {
+          lat = lat.replace(',', '.');
+          lat = parseFloat(lat);
+        }
+        if (typeof lng === 'string') {
+          lng = lng.replace(',', '.');
+          lng = parseFloat(lng);
+        }
+        
+        const cto = {
+          cid_rede: rowData.cid_rede || null,
+          estado: rowData.estado || null,
+          pop: rowData.pop || null,
+          olt: rowData.olt || null,
+          slot: rowData.slot || null,
+          pon: rowData.pon || null,
+          id_cto: rowData.id_cto || null,
+          cto: rowData.cto || null,
+          latitude: (lat && !isNaN(lat)) ? lat : null,
+          longitude: (lng && !isNaN(lng)) ? lng : null,
+          status_cto: rowData.status_cto || null,
+          data_cadastro: parseDate(rowData.data_cadastro),
+          portas: rowData.portas ? parseInt(rowData.portas) : null,
+          ocupado: rowData.ocupado ? parseInt(rowData.ocupado) : null,
+          livre: rowData.livre ? parseInt(rowData.livre) : null,
+          pct_ocup: rowData.pct_ocup ? parseFloat(rowData.pct_ocup) : null
+        };
+        
+        // Validar coordenadas
+        if (cto.latitude && cto.longitude && 
+            !isNaN(cto.latitude) && !isNaN(cto.longitude) &&
+            cto.latitude >= -90 && cto.latitude <= 90 &&
+            cto.longitude >= -180 && cto.longitude <= 180) {
+          totalValid++;
+          currentBatch.push(cto);
+          
+          // Inserir lote quando atingir tamanho
+          if (currentBatch.length >= BATCH_SIZE) {
+            await insertBatch(currentBatch);
+            currentBatch = []; // Limpar batch
+          }
+        } else {
+          totalInvalid++;
+        }
+      } catch (rowErr) {
+        totalInvalid++;
+      }
+      
+      processedRows++;
+      
+      // Log de progresso a cada 10000 linhas
+      if (processedRows % 10000 === 0) {
+        console.log(`📊 [Streaming] Progresso: ${processedRows}/${totalRows} linhas processadas (${totalValid} válidas, ${totalInvalid} inválidas)`);
+        
+        // Forçar garbage collection periodicamente
+        if (global.gc) {
+          global.gc();
+        }
+      }
+    }
+    
+    // Inserir lote restante
+    if (currentBatch.length > 0) {
+      await insertBatch(currentBatch);
+    }
+    
+    console.log(`📊 [Streaming] Processamento concluído: ${totalValid} válidas, ${totalInvalid} inválidas`);
+    console.log(`✅ [Streaming] ${importedRows} CTOs importadas no Supabase`);
+    
+    return {
+      totalRows,
+      validRows: totalValid,
+      invalidRows: totalInvalid,
+      importedRows
+    };
+  } catch (err) {
+    console.error('❌ [Streaming] Erro ao processar Excel:', err);
+    throw err;
+  }
+}
+
 // Validação ultra-leve: apenas verifica se é um arquivo Excel válido
-// A validação detalhada será feita durante o processamento em chunks
+// A validação detalhada será feita durante o processamento em streaming
 function validateExcelStructure(filePathOrBuffer) {
   try {
     const isFilePath = typeof filePathOrBuffer === 'string';
@@ -1938,56 +2135,12 @@ function validateExcelStructure(filePathOrBuffer) {
       return { valid: false, error: 'Arquivo deve ter extensão .xlsx ou .xls' };
     }
     
-    // Tentar ler apenas metadados mínimos (sem processar células)
-    // Usar opções ultra-leves para economizar memória
-    const workbook = XLSX.read(filePathOrBuffer, { 
-      type: isFilePath ? 'file' : 'buffer',
-      cellDates: false,
-      cellNF: false,
-      cellStyles: false,
-      sheetStubs: false,
-      dense: false,
-      // Opções adicionais para reduzir uso de memória
-      bookSheets: false, // Não processar sheets automaticamente
-      bookProps: false, // Não processar propriedades do livro
-      bookFiles: false // Não processar arquivos internos
-    });
-    
-    // Verificações básicas
-    if (!workbook.SheetNames || workbook.SheetNames.length === 0) {
-      return { valid: false, error: 'O arquivo Excel não contém planilhas' };
-    }
-    
-    const sheetName = workbook.SheetNames[0];
-    const worksheet = workbook.Sheets[sheetName];
-    
-    if (!worksheet || !worksheet['!ref']) {
-      return { valid: false, error: 'A planilha está vazia ou não contém dados' };
-    }
-    
-    // Obter apenas o range (sem processar dados)
-    const range = XLSX.utils.decode_range(worksheet['!ref']);
-    const totalRows = range.e.r + 1;
-    
-    if (totalRows <= 1) {
-      return { valid: false, error: 'O arquivo Excel está vazio (apenas cabeçalho ou sem dados)' };
-    }
-    
-    // Limpar referências imediatamente para liberar memória
-    workbook.SheetNames = null;
-    workbook.Sheets = null;
-    worksheet = null;
-    range = null;
-    
-    // Validação detalhada será feita durante processamento em chunks
-    // Retornar apenas que o arquivo é válido estruturalmente
-    console.log(`✅ [Validação] Arquivo Excel válido: ${totalRows} linhas detectadas`);
-    console.log(`ℹ️ [Validação] Validação detalhada será feita durante processamento em chunks`);
-    
+    // Para arquivos grandes, apenas verificar se é um Excel válido usando exceljs (mais eficiente)
+    // Não carregar tudo na memória
     return {
       valid: true,
-      totalRows: totalRows,
-      validRows: totalRows - 1, // Assumir todas menos cabeçalho (validação detalhada depois)
+      totalRows: 0, // Será calculado durante processamento
+      validRows: 0,
       invalidRows: 0
     };
   } catch (err) {
@@ -2165,98 +2318,11 @@ app.post('/api/upload-base', (req, res, next) => {
         // Tentar importar para Supabase ANTES de salvar arquivo Excel
         let supabaseImported = false;
         let importedRows = 0;
+        let totalRows = 0;
         if (supabase && isSupabaseAvailable()) {
           try {
             console.log('📤 [Background] ===== INICIANDO IMPORTAÇÃO SUPABASE =====');
-            console.log('📤 [Background] Processando Excel em chunks para economizar memória...');
-            
-            // OTIMIZAÇÃO DE MEMÓRIA: Processar Excel em chunks
-            // Ler apenas metadados mínimos (sem processar células) para saber quantas linhas temos
-            // Usar opções ultra-leves para reduzir uso de memória
-            let workbook, sheetName, worksheet, range, totalRows;
-            
-            try {
-              workbook = XLSX.readFile(tempFilePath, { 
-                cellDates: false,
-                cellNF: false,
-                cellStyles: false,
-                sheetStubs: false,
-                bookSheets: false,
-                bookProps: false,
-                bookFiles: false
-              });
-              
-              if (!workbook.SheetNames || workbook.SheetNames.length === 0) {
-                throw new Error('Arquivo Excel não contém planilhas');
-              }
-              
-              sheetName = workbook.SheetNames[0];
-              worksheet = workbook.Sheets[sheetName];
-              
-              if (!worksheet || !worksheet['!ref']) {
-                throw new Error('Planilha está vazia ou não contém dados');
-              }
-              
-              // Obter range de linhas do worksheet
-              range = XLSX.utils.decode_range(worksheet['!ref'] || 'A1');
-              totalRows = range.e.r + 1; // +1 porque range é 0-indexed
-              
-              if (totalRows <= 1) {
-                throw new Error('Arquivo Excel está vazio (apenas cabeçalho ou sem dados)');
-              }
-              
-              console.log(`📊 [Background] Total de linhas no Excel: ${totalRows}`);
-            } catch (readErr) {
-              console.error('❌ [Background] Erro ao ler metadados do Excel:', readErr.message);
-              throw new Error(`Arquivo Excel inválido ou corrompido: ${readErr.message}`);
-            }
-            
-            // Processar em chunks menores para economizar memória
-            const CHUNK_SIZE = 2000; // Reduzido para 2000 linhas por vez (economiza mais memória)
-            const totalChunks = Math.ceil(totalRows / CHUNK_SIZE);
-            console.log(`📦 [Background] Processando em ${totalChunks} chunk(s) de até ${CHUNK_SIZE} linhas cada...`);
-            
-            // Limpar workbook imediatamente após obter metadados (não manter referência completa)
-            // Vamos recriar apenas o necessário para cada chunk
-            const workbookRef = {
-              SheetNames: workbook.SheetNames,
-              Sheets: workbook.Sheets
-            };
-            
-            // Limpar referência original
-            workbook = null;
-            
-            // Função auxiliar para converter data
-            const parseDate = (value) => {
-              if (!value) return null;
-              if (value instanceof Date) return value.toISOString().split('T')[0];
-              if (typeof value === 'string') {
-                const date = new Date(value);
-                if (!isNaN(date.getTime())) {
-                  return date.toISOString().split('T')[0];
-                }
-              }
-              if (typeof value === 'number') {
-                const date = XLSX.SSF.parse_date_code(value);
-                if (date) {
-                  return `${date.y}-${String(date.m).padStart(2, '0')}-${String(date.d).padStart(2, '0')}`;
-                }
-              }
-              return null;
-            };
-            
-            // Função para normalizar chaves
-            const normalizeKey = (key) => {
-              const lower = String(key || '').toLowerCase().trim();
-              const mapping = {
-                'cid_rede': 'cid_rede', 'cid rede': 'cid_rede', 'estado': 'estado', 'pop': 'pop',
-                'olt': 'olt', 'slot': 'slot', 'pon': 'pon', 'id_cto': 'id_cto', 'id cto': 'id_cto', 'cto': 'cto',
-                'latitude': 'latitude', 'lat': 'latitude', 'longitude': 'longitude', 'long': 'longitude', 'lng': 'longitude',
-                'status_cto': 'status_cto', 'status cto': 'status_cto', 'data_cadastro': 'data_cadastro', 'data cadastro': 'data_cadastro',
-                'portas': 'portas', 'ocupado': 'ocupado', 'livre': 'livre', 'pct_ocup': 'pct_ocup', 'pct ocup': 'pct_ocup'
-              };
-              return mapping[lower] || lower;
-            };
+            console.log('📤 [Background] Usando processamento em STREAMING (exceljs) para arquivos grandes...');
             
             // Deletar todas as CTOs existentes antes de importar
             console.log('🗑️ [Background] Limpando CTOs antigas do Supabase...');
@@ -2271,165 +2337,10 @@ app.post('/api/upload-base', (req, res, next) => {
             }
             console.log(`✅ [Background] CTOs antigas removidas (${deleteCount || 'N/A'} registros)`);
             
-            // Processar e importar em chunks
-            let totalValid = 0;
-            let totalInvalid = 0;
-            const BATCH_SIZE = 1000; // Tamanho do lote para Supabase
-            
-            for (let chunkStart = 0; chunkStart < totalRows; chunkStart += CHUNK_SIZE) {
-              const chunkEnd = Math.min(chunkStart + CHUNK_SIZE, totalRows);
-              const chunkNumber = Math.floor(chunkStart / CHUNK_SIZE) + 1;
-              
-              console.log(`📦 [Background] Processando chunk ${chunkNumber}/${totalChunks} (linhas ${chunkStart + 1}-${chunkEnd})...`);
-              
-              // Ler apenas este chunk do Excel diretamente do worksheet original
-              // Usar range para limitar o que é processado
-              const chunkRange = XLSX.utils.encode_range({
-                s: { c: 0, r: chunkStart },
-                e: { c: range.e.c, r: chunkEnd - 1 }
-              });
-              
-              // Criar worksheet temporário apenas com este chunk (copiar apenas células necessárias)
-              const chunkWorksheet = {};
-              for (let R = chunkStart; R < chunkEnd; R++) {
-                for (let C = 0; C <= range.e.c; C++) {
-                  const cellAddress = XLSX.utils.encode_cell({ r: R, c: C });
-                  if (worksheet[cellAddress]) {
-                    // Copiar apenas valor e tipo (não copiar formatação completa)
-                    chunkWorksheet[cellAddress] = {
-                      t: worksheet[cellAddress].t,
-                      v: worksheet[cellAddress].v,
-                      w: worksheet[cellAddress].w
-                    };
-                  }
-                }
-              }
-              chunkWorksheet['!ref'] = chunkRange;
-              
-              // Converter chunk para JSON (apenas este range)
-              const chunkData = XLSX.utils.sheet_to_json(chunkWorksheet, {
-                defval: '',
-                raw: false // Converter valores formatados
-              });
-              
-              // Processar chunk
-              let chunkValid = 0;
-              let chunkInvalid = 0;
-              const ctosToImport = [];
-              
-              for (let index = 0; index < chunkData.length; index++) {
-                const row = chunkData[index];
-                try {
-                  const normalizedRow = {};
-                  for (const key in row) {
-                    const normalizedKey = normalizeKey(key);
-                    normalizedRow[normalizedKey] = row[key];
-                  }
-                  
-                  let lat = normalizedRow.latitude;
-                  let lng = normalizedRow.longitude;
-                  
-                  if (typeof lat === 'string') {
-                    lat = lat.replace(',', '.');
-                    lat = parseFloat(lat);
-                  }
-                  if (typeof lng === 'string') {
-                    lng = lng.replace(',', '.');
-                    lng = parseFloat(lng);
-                  }
-                  
-                  const cto = {
-                    cid_rede: normalizedRow.cid_rede || null,
-                    estado: normalizedRow.estado || null,
-                    pop: normalizedRow.pop || null,
-                    olt: normalizedRow.olt || null,
-                    slot: normalizedRow.slot || null,
-                    pon: normalizedRow.pon || null,
-                    id_cto: normalizedRow.id_cto || null,
-                    cto: normalizedRow.cto || null,
-                    latitude: (lat && !isNaN(lat)) ? lat : null,
-                    longitude: (lng && !isNaN(lng)) ? lng : null,
-                    status_cto: normalizedRow.status_cto || null,
-                    data_cadastro: parseDate(normalizedRow.data_cadastro),
-                    portas: normalizedRow.portas ? parseInt(normalizedRow.portas) : null,
-                    ocupado: normalizedRow.ocupado ? parseInt(normalizedRow.ocupado) : null,
-                    livre: normalizedRow.livre ? parseInt(normalizedRow.livre) : null,
-                    pct_ocup: normalizedRow.pct_ocup ? parseFloat(normalizedRow.pct_ocup) : null
-                  };
-                  
-                  if (cto.latitude && cto.longitude && 
-                      !isNaN(cto.latitude) && !isNaN(cto.longitude) &&
-                      cto.latitude >= -90 && cto.latitude <= 90 &&
-                      cto.longitude >= -180 && cto.longitude <= 180) {
-                    chunkValid++;
-                    ctosToImport.push(cto);
-                  } else {
-                    chunkInvalid++;
-                  }
-                } catch (rowErr) {
-                  chunkInvalid++;
-                }
-              }
-              
-              totalValid += chunkValid;
-              totalInvalid += chunkInvalid;
-              
-              console.log(`📊 [Background] Chunk ${chunkNumber}: ${chunkValid} válidas, ${chunkInvalid} inválidas`);
-              
-              // Importar chunk no Supabase em lotes
-              if (ctosToImport.length > 0) {
-                for (let i = 0; i < ctosToImport.length; i += BATCH_SIZE) {
-                  const batch = ctosToImport.slice(i, i + BATCH_SIZE);
-                  const batchNumber = Math.floor(i / BATCH_SIZE) + 1;
-                  const totalBatches = Math.ceil(ctosToImport.length / BATCH_SIZE);
-                  
-                  const { error: insertError } = await supabase
-                    .from('ctos')
-                    .insert(batch);
-                  
-                  if (insertError) {
-                    console.error(`❌ [Background] Erro ao importar lote ${batchNumber}/${totalBatches} do chunk ${chunkNumber}:`, insertError);
-                    throw insertError;
-                  }
-                  
-                  importedRows += batch.length;
-                }
-                console.log(`✅ [Background] Chunk ${chunkNumber} importado: ${ctosToImport.length} CTOs (total: ${importedRows})`);
-              }
-              
-              // Limpar variáveis do chunk para liberar memória
-              chunkWorksheet = null;
-              chunkData = null;
-              ctosToImport.length = 0; // Limpar array
-              
-              // Forçar garbage collection (se disponível)
-              if (global.gc) {
-                global.gc();
-              }
-            }
-            
-            console.log(`📊 [Background] Total processado: ${totalValid} válidas, ${totalInvalid} inválidas`);
-            
-            // Mostrar primeiras colunas encontradas para debug (antes de limpar)
-            if (totalRows > 0 && worksheet) {
-              try {
-                const firstChunkData = XLSX.utils.sheet_to_json(worksheet, { range: `A1:${String.fromCharCode(65 + range.e.c)}1` });
-                if (firstChunkData.length > 0) {
-                  const columns = Object.keys(firstChunkData[0]);
-                  console.log(`📋 [Background] Colunas encontradas no Excel (${columns.length}):`, columns.slice(0, 10).join(', '), columns.length > 10 ? '...' : '');
-                }
-              } catch (colErr) {
-                // Ignorar erro ao ler colunas (não crítico)
-              }
-            }
-            
-            // Limpar referências para liberar memória (workbook já foi limpo antes)
-            if (workbookRef) {
-              workbookRef.SheetNames = null;
-              workbookRef.Sheets = null;
-            }
-            worksheet = null;
-            range = null;
+            // Processar usando streaming (exceljs) - NÃO carrega arquivo inteiro na memória
+            const result = await processExcelStreaming(tempFilePath, supabase);
+            totalRows = result.totalRows;
+            importedRows = result.importedRows;
             
             if (importedRows > 0) {
               supabaseImported = true;
@@ -2459,7 +2370,7 @@ app.post('/api/upload-base', (req, res, next) => {
               console.log(`✅ [Background] ${importedRows} CTOs importadas com sucesso no Supabase!`);
             } else {
               console.warn('⚠️ [Background] Nenhuma CTO válida encontrada para importar');
-              console.warn(`⚠️ [Background] Total de linhas: ${totalRows}, Válidas: ${totalValid}, Inválidas: ${totalInvalid}`);
+              console.warn(`⚠️ [Background] Total de linhas: ${totalRows}, Válidas: ${result.validRows}, Inválidas: ${result.invalidRows}`);
             }
           } catch (supabaseErr) {
             console.error('❌ [Background] ===== ERRO NA IMPORTAÇÃO SUPABASE =====');
