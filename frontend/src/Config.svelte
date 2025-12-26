@@ -39,6 +39,7 @@
   let uploadMessage = '';
   let uploadSuccess = false;
   let baseLastModified = null;
+  let uploadPollInterval = null; // Intervalo de polling para verificar status
 
   // Carregar dados do localStorage primeiro (instantâneo)
   function loadFromLocalStorage() {
@@ -344,6 +345,11 @@
 
   // Função para fechar tela de configurações
   function closeSettings() {
+    // Limpar polling se estiver ativo
+    if (uploadPollInterval) {
+      clearInterval(uploadPollInterval);
+      uploadPollInterval = null;
+    }
     uploadMessage = '';
     uploadSuccess = false;
     uploadingBase = false;
@@ -746,30 +752,109 @@
       }
 
       if (data.success) {
-        uploadSuccess = true;
-        uploadMessage = data.message || 'Base de dados atualizada com sucesso!';
-        
-        if (data.lastModified) {
-          baseLastModified = new Date(data.lastModified);
-        }
-        
-        // Recarregar os dados das CTOs
-        if (onReloadCTOs) {
-          try {
-            await onReloadCTOs();
-            console.log('✅ Base de dados recarregada com sucesso');
-          } catch (err) {
-            console.error('Erro ao recarregar base de dados:', err);
+        // Se o backend indicou que está processando em background
+        if (data.processing) {
+          uploadSuccess = false; // Ainda não é sucesso definitivo
+          uploadMessage = data.message || 'Upload recebido! Processando arquivo em background...';
+          uploadingBase = true; // Manter flag de upload ativo
+          
+          // Iniciar polling para verificar status do processamento
+          // O backend processa em background, então precisamos verificar periodicamente
+          let pollAttempts = 0;
+          const maxPollAttempts = 120; // 10 minutos máximo (120 * 5s = 600s)
+          const pollInterval = 5000; // Verificar a cada 5 segundos
+          
+          const pollStatus = setInterval(async () => {
+            pollAttempts++;
+            
+            try {
+              // Verificar se a base foi atualizada verificando a data de modificação
+              await loadBaseLastModified();
+              
+              // Se passou muito tempo, assumir que terminou (ou deu erro)
+              if (pollAttempts >= maxPollAttempts) {
+                clearInterval(pollStatus);
+                uploadingBase = false;
+                uploadMessage = 'Processamento demorou mais que o esperado. Verifique os logs do servidor.';
+                uploadSuccess = false;
+                return;
+              }
+              
+              // Verificar se há uma nova base (indicando sucesso)
+              // Isso será verificado quando loadBaseLastModified atualizar baseLastModified
+              // Por enquanto, apenas continuar verificando
+            } catch (pollErr) {
+              console.error('❌ [Upload] Erro ao verificar status:', pollErr);
+              // Continuar tentando
+            }
+          }, pollInterval);
+          
+          // Parar polling após 10 minutos ou quando base for atualizada
+          setTimeout(() => {
+            clearInterval(pollStatus);
+            if (uploadingBase) {
+              // Se ainda está processando, verificar uma última vez
+              loadBaseLastModified().then(() => {
+                uploadingBase = false;
+                if (baseLastModified && baseLastModified > new Date(Date.now() - 600000)) {
+                  // Base foi atualizada nos últimos 10 minutos, assumir sucesso
+                  uploadSuccess = true;
+                  uploadMessage = 'Base de dados atualizada com sucesso!';
+                  
+                  // Recarregar os dados das CTOs
+                  if (onReloadCTOs) {
+                    onReloadCTOs().catch(err => {
+                      console.error('Erro ao recarregar base de dados:', err);
+                    });
+                  }
+                } else {
+                  uploadMessage = 'Processamento concluído. Verifique se a base foi atualizada corretamente.';
+                }
+              }).catch(() => {
+                uploadingBase = false;
+                uploadMessage = 'Não foi possível verificar o status final do processamento.';
+              });
+            }
+          }, 600000); // 10 minutos
+          
+          event.target.value = '';
+          return; // Não limpar uploadingBase ainda
+        } else {
+          // Processamento imediato (não em background)
+          uploadSuccess = true;
+          uploadMessage = data.message || 'Base de dados atualizada com sucesso!';
+          
+          if (data.lastModified) {
+            baseLastModified = new Date(data.lastModified);
           }
-        }
+          
+          // Recarregar os dados das CTOs
+          if (onReloadCTOs) {
+            try {
+              await onReloadCTOs();
+              console.log('✅ Base de dados recarregada com sucesso');
+            } catch (err) {
+              console.error('Erro ao recarregar base de dados:', err);
+            }
+          }
 
-        event.target.value = '';
+          event.target.value = '';
+          uploadingBase = false;
+        }
       } else {
         uploadSuccess = false;
         uploadMessage = data.error || 'Erro ao atualizar base de dados';
+        uploadingBase = false;
       }
     } catch (err) {
+      // Limpar polling se houver erro
+      if (uploadPollInterval) {
+        clearInterval(uploadPollInterval);
+        uploadPollInterval = null;
+      }
+      
       uploadSuccess = false;
+      uploadingBase = false;
       
       // Mensagens de erro mais específicas
       if (err.name === 'TypeError' && err.message.includes('Failed to fetch')) {
@@ -787,8 +872,6 @@
       console.error('❌ [Upload] Erro ao fazer upload da base:', err);
       console.error('❌ [Upload] Tipo do erro:', err.name);
       console.error('❌ [Upload] Mensagem:', err.message);
-    } finally {
-      uploadingBase = false;
     }
   }
 </script>
@@ -1900,86 +1983,3 @@
     display: inline-block;
     padding: 0.875rem 1.5rem;
     background: linear-gradient(135deg, #7B68EE 0%, #6495ED 100%);
-    color: white;
-    border-radius: 8px;
-    cursor: pointer;
-    font-weight: 600;
-    font-size: 0.95rem;
-    transition: all 0.3s ease;
-    box-shadow: 0 4px 6px rgba(123, 104, 238, 0.3);
-  }
-
-  .upload-label:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 6px 12px rgba(123, 104, 238, 0.4);
-  }
-
-  .upload-label:active {
-    transform: translateY(0);
-  }
-
-  .upload-hint {
-    font-size: 0.875rem;
-    color: #666;
-    margin: 0.75rem 0;
-    line-height: 1.5;
-  }
-
-  .last-modified-text {
-    font-size: 0.875rem;
-    color: #7B68EE;
-    margin: 1rem 0 0.5rem 0;
-    font-weight: 600;
-  }
-
-  .upload-status {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 0.75rem;
-    margin: 1rem 0;
-    padding: 1rem;
-    background: rgba(123, 104, 238, 0.1);
-    border-radius: 8px;
-    color: #7B68EE;
-    font-size: 0.9rem;
-    font-weight: 500;
-    border: 1px solid rgba(123, 104, 238, 0.2);
-  }
-
-  .loading-spinner {
-    width: 20px;
-    height: 20px;
-    border: 3px solid rgba(123, 104, 238, 0.2);
-    border-top-color: #7B68EE;
-    border-radius: 50%;
-    animation: spin 1s linear infinite;
-  }
-
-  @keyframes spin {
-    to { transform: rotate(360deg); }
-  }
-
-  .upload-message {
-    margin: 1rem 0;
-    padding: 1rem;
-    border-radius: 8px;
-    font-size: 0.9rem;
-    line-height: 1.5;
-    white-space: pre-line;
-    font-weight: 500;
-  }
-
-  .upload-message.success {
-    background: rgba(76, 175, 80, 0.1);
-    border: 1px solid #4CAF50;
-    color: #2e7d32;
-  }
-
-  .upload-message.error {
-    background: rgba(244, 67, 54, 0.1);
-    border: 1px solid #F44336;
-    color: #c62828;
-  }
-</style>
-
