@@ -570,13 +570,17 @@ app.get('/api/base.xlsx', async (req, res) => {
     }
     res.setHeader('Access-Control-Allow-Credentials', 'true');
     
-    console.log('📥 [Base] Requisição para /api/base.xlsx recebida');
+    console.log('📥 [Base] ===== REQUISIÇÃO /api/base.xlsx RECEBIDA =====');
+    console.log('📥 [Base] Timestamp:', new Date().toISOString());
     
     // Tentar ler do Supabase primeiro
     const supabaseData = await readCTOsFromSupabase();
     
+    console.log('📊 [Base] Resultado do Supabase:', supabaseData === null ? 'null (fallback)' : (Array.isArray(supabaseData) && supabaseData.length === 0) ? 'array vazio' : `${supabaseData.length} CTOs`);
+    
     // Se Supabase retornou dados (mesmo que vazio), usar Supabase
     if (supabaseData !== null) {
+      console.log('✅ [Base] Usando dados do Supabase');
       try {
         // Se tiver dados, usar; se estiver vazio, criar estrutura vazia
         const dataToExport = supabaseData.length > 0 
@@ -619,6 +623,7 @@ app.get('/api/base.xlsx', async (req, res) => {
         res.setHeader('Content-Length', excelBuffer.length);
         
         // Enviar buffer
+        console.log('✅ [Base] Excel enviado com sucesso para o frontend');
         res.send(excelBuffer);
         return;
       } catch (excelErr) {
@@ -3345,6 +3350,87 @@ app.get('/api/test', (req, res) => {
     timestamp: new Date().toISOString(),
     origin: req.headers.origin || 'N/A'
   });
+});
+
+// Rota para verificar quantas CTOs existem no Supabase (debug)
+app.get('/api/debug/ctos-count', async (req, res) => {
+  try {
+    // Garantir headers CORS
+    const origin = req.headers.origin;
+    if (origin) {
+      res.setHeader('Access-Control-Allow-Origin', origin);
+    } else {
+      res.setHeader('Access-Control-Allow-Origin', '*');
+    }
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+    
+    console.log('🔍 [Debug] Verificando quantidade de CTOs no Supabase...');
+    
+    if (!supabase || !isSupabaseAvailable()) {
+      return res.json({
+        success: false,
+        error: 'Supabase não disponível',
+        count: 0,
+        source: 'none'
+      });
+    }
+    
+    // Contar CTOs
+    const { count, error: countError } = await supabase
+      .from('ctos')
+      .select('*', { count: 'exact', head: true });
+    
+    if (countError) {
+      console.error('❌ [Debug] Erro ao contar CTOs:', countError);
+      return res.json({
+        success: false,
+        error: countError.message,
+        count: 0,
+        source: 'supabase_error'
+      });
+    }
+    
+    // Buscar algumas CTOs de exemplo (primeiras 5)
+    const { data: sampleData, error: sampleError } = await supabase
+      .from('ctos')
+      .select('id_cto, cto, latitude, longitude, portas, ocupado')
+      .limit(5);
+    
+    const sample = sampleError ? [] : (sampleData || []);
+    
+    console.log(`✅ [Debug] Total de CTOs no Supabase: ${count || 0}`);
+    console.log(`📋 [Debug] Exemplos: ${sample.length} CTOs`);
+    
+    res.json({
+      success: true,
+      count: count || 0,
+      source: 'supabase',
+      sample: sample.map(row => ({
+        id_cto: row.id_cto,
+        cto: row.cto,
+        latitude: row.latitude,
+        longitude: row.longitude,
+        hasCoords: !!(row.latitude && row.longitude && !isNaN(row.latitude) && !isNaN(row.longitude))
+      }))
+    });
+  } catch (err) {
+    console.error('❌ [Debug] Erro ao verificar CTOs:', err);
+    
+    const origin = req.headers.origin;
+    if (origin) {
+      res.setHeader('Access-Control-Allow-Origin', origin);
+    } else {
+      res.setHeader('Access-Control-Allow-Origin', '*');
+    }
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+    
+    res.status(500).json({
+      success: false,
+      error: err.message,
+      count: 0,
+      source: 'error'
+    });
+  }
 });
 
 // Rota para testar conexão com Supabase
