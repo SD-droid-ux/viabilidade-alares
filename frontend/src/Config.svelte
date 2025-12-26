@@ -66,6 +66,12 @@
 
   // Carregar dados ao montar (atualizar com dados do servidor)
   onMount(async () => {
+    // Limpar qualquer polling anterior que possa ter ficado ativo
+    if (uploadPollInterval) {
+      clearInterval(uploadPollInterval);
+      uploadPollInterval = null;
+    }
+    
     // Carregar do localStorage primeiro para mostrar instantaneamente
     loadFromLocalStorage();
     
@@ -85,13 +91,27 @@
       loadOnlineUsers();
     }, 10000);
     
-    // Limpar intervalo quando componente for destruído
+    // Limpar intervalos quando componente for destruído
     return () => {
       if (onlineUsersInterval) {
         clearInterval(onlineUsersInterval);
+        onlineUsersInterval = null;
+      }
+      if (uploadPollInterval) {
+        clearInterval(uploadPollInterval);
+        uploadPollInterval = null;
       }
     };
   });
+  
+  // Verificação reativa: limpar polling se não houver upload em andamento
+  $: {
+    if (!uploadingBase && uploadPollInterval) {
+      console.log('🛑 [Polling] Limpando polling - não há upload em andamento');
+      clearInterval(uploadPollInterval);
+      uploadPollInterval = null;
+    }
+  }
 
   // Carregar projetistas
   async function loadProjetistas() {
@@ -356,7 +376,6 @@
     if (onClose) {
       onClose();
     }
-    onClose();
   }
 
   // Função para abrir modal de confirmação de exclusão
@@ -758,46 +777,77 @@
           uploadMessage = data.message || 'Upload recebido! Processando arquivo em background...';
           uploadingBase = true; // Manter flag de upload ativo
           
+          // Limpar qualquer polling anterior
+          if (uploadPollInterval) {
+            clearInterval(uploadPollInterval);
+            uploadPollInterval = null;
+          }
+          
+          // Guardar timestamp antes do upload para comparar depois
+          const timestampBeforeUpload = baseLastModified ? baseLastModified.getTime() : 0;
+          
           // Iniciar polling para verificar status do processamento
           // O backend processa em background, então precisamos verificar periodicamente
           let pollAttempts = 0;
           const maxPollAttempts = 120; // 10 minutos máximo (120 * 5s = 600s)
           const pollInterval = 5000; // Verificar a cada 5 segundos
           
-          const pollStatus = setInterval(async () => {
+          uploadPollInterval = setInterval(async () => {
             pollAttempts++;
             
             try {
               // Verificar se a base foi atualizada verificando a data de modificação
               await loadBaseLastModified();
               
+              // Verificar se a base foi atualizada (nova data de modificação)
+              if (baseLastModified && baseLastModified.getTime() > timestampBeforeUpload) {
+                // Base foi atualizada! Parar polling e marcar como sucesso
+                clearInterval(uploadPollInterval);
+                uploadPollInterval = null;
+                uploadingBase = false;
+                uploadSuccess = true;
+                uploadMessage = 'Base de dados atualizada com sucesso!';
+                
+                // Recarregar os dados das CTOs
+                if (onReloadCTOs) {
+                  try {
+                    await onReloadCTOs();
+                    console.log('✅ Base de dados recarregada com sucesso após upload');
+                  } catch (err) {
+                    console.error('Erro ao recarregar base de dados:', err);
+                  }
+                }
+                
+                return; // Parar polling
+              }
+              
               // Se passou muito tempo, assumir que terminou (ou deu erro)
               if (pollAttempts >= maxPollAttempts) {
-                clearInterval(pollStatus);
+                clearInterval(uploadPollInterval);
+                uploadPollInterval = null;
                 uploadingBase = false;
                 uploadMessage = 'Processamento demorou mais que o esperado. Verifique os logs do servidor.';
                 uploadSuccess = false;
                 return;
               }
-              
-              // Verificar se há uma nova base (indicando sucesso)
-              // Isso será verificado quando loadBaseLastModified atualizar baseLastModified
-              // Por enquanto, apenas continuar verificando
             } catch (pollErr) {
               console.error('❌ [Upload] Erro ao verificar status:', pollErr);
-              // Continuar tentando
+              // Continuar tentando até atingir maxPollAttempts
             }
           }, pollInterval);
           
-          // Parar polling após 10 minutos ou quando base for atualizada
+          // Parar polling após 10 minutos (timeout de segurança)
           setTimeout(() => {
-            clearInterval(pollStatus);
+            if (uploadPollInterval) {
+              clearInterval(uploadPollInterval);
+              uploadPollInterval = null;
+            }
             if (uploadingBase) {
               // Se ainda está processando, verificar uma última vez
               loadBaseLastModified().then(() => {
                 uploadingBase = false;
-                if (baseLastModified && baseLastModified > new Date(Date.now() - 600000)) {
-                  // Base foi atualizada nos últimos 10 minutos, assumir sucesso
+                if (baseLastModified && baseLastModified.getTime() > timestampBeforeUpload) {
+                  // Base foi atualizada, assumir sucesso
                   uploadSuccess = true;
                   uploadMessage = 'Base de dados atualizada com sucesso!';
                   
