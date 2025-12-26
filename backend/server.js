@@ -627,66 +627,230 @@ app.get('/api/base.xlsx', async (req, res) => {
     console.log('📥 [Base] ===== REQUISIÇÃO /api/base.xlsx RECEBIDA =====');
     console.log('📥 [Base] Timestamp:', new Date().toISOString());
     
-    // Tentar ler do Supabase primeiro
-    const supabaseData = await readCTOsFromSupabase();
-    
-    console.log('📊 [Base] Resultado do Supabase:', supabaseData === null ? 'null (fallback)' : (Array.isArray(supabaseData) && supabaseData.length === 0) ? 'array vazio' : `${supabaseData.length} CTOs`);
-    
-    // Se Supabase retornou dados (mesmo que vazio), usar Supabase
-    if (supabaseData !== null) {
-      console.log('✅ [Base] Usando dados do Supabase');
+    // Tentar usar Supabase primeiro (com streaming para grandes volumes)
+    if (supabase && isSupabaseAvailable()) {
       try {
-        // Se tiver dados, usar; se estiver vazio, criar estrutura vazia
-        const dataToExport = supabaseData.length > 0 
-          ? supabaseData 
-          : [{
-              cid_rede: '',
-              estado: '',
-              pop: '',
-              olt: '',
-              slot: '',
-              pon: '',
-              id_cto: '',
-              cto: '',
-              latitude: '',
-              longitude: '',
-              status_cto: '',
-              data_cadastro: '',
-              portas: '',
-              ocupado: '',
-              livre: '',
-              pct_ocup: ''
-            }];
+        console.log('✅ [Base] Usando dados do Supabase com STREAMING');
         
-        console.log('📤 [Supabase] Convertendo CTOs do Supabase para Excel...');
-        console.log(`📊 [Supabase] Total de CTOs: ${supabaseData.length}`);
+        // Primeiro, contar quantas CTOs existem
+        const { count, error: countError } = await supabase
+          .from('ctos')
+          .select('*', { count: 'exact', head: true });
         
-        // Criar workbook Excel em memória
-        const worksheet = XLSX.utils.json_to_sheet(dataToExport);
-        const workbook = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(workbook, worksheet, 'CTOs');
+        if (countError) {
+          console.error('❌ [Supabase] Erro ao contar CTOs:', countError);
+          throw countError;
+        }
         
-        // Gerar buffer Excel
-        const excelBuffer = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
+        console.log(`📊 [Supabase] Total de CTOs no banco: ${count || 0}`);
         
-        console.log(`✅ [Supabase] Excel gerado: ${supabaseData.length} CTOs (${excelBuffer.length} bytes)`);
+        if (!count || count === 0) {
+          console.log('⚠️ [Supabase] Nenhuma CTO encontrada, criando Excel vazio...');
+          // Criar Excel vazio
+          const workbook = new ExcelJS.Workbook();
+          const worksheet = workbook.addWorksheet('CTOs');
+          worksheet.columns = [
+            { header: 'CID_REDE', key: 'cid_rede' },
+            { header: 'ESTADO', key: 'estado' },
+            { header: 'POP', key: 'pop' },
+            { header: 'OLT', key: 'olt' },
+            { header: 'SLOT', key: 'slot' },
+            { header: 'PON', key: 'pon' },
+            { header: 'ID_CTO', key: 'id_cto' },
+            { header: 'CTO', key: 'cto' },
+            { header: 'LATITUDE', key: 'latitude' },
+            { header: 'LONGITUDE', key: 'longitude' },
+            { header: 'STATUS_CTO', key: 'status_cto' },
+            { header: 'DATA_CADASTRO', key: 'data_cadastro' },
+            { header: 'PORTAS', key: 'portas' },
+            { header: 'OCUPADO', key: 'ocupado' },
+            { header: 'LIVRE', key: 'livre' },
+            { header: 'PCT_OCUP', key: 'pct_ocup' }
+          ];
+          
+          res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+          res.setHeader('Content-Disposition', 'attachment; filename="base.xlsx"');
+          await workbook.xlsx.write(res);
+          return;
+        }
         
-        // Configurar headers para download
+        // Configurar headers para streaming
         res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
         res.setHeader('Content-Disposition', 'attachment; filename="base.xlsx"');
-        res.setHeader('Content-Length', excelBuffer.length);
         
-        // Enviar buffer
-        console.log('✅ [Base] Excel enviado com sucesso para o frontend');
-        res.send(excelBuffer);
+        // Criar workbook Excel em streaming usando exceljs
+        const workbook = new ExcelJS.Workbook();
+        const worksheet = workbook.addWorksheet('CTOs');
+        
+        // Definir cabeçalhos
+        worksheet.columns = [
+          { header: 'CID_REDE', key: 'cid_rede', width: 15 },
+          { header: 'ESTADO', key: 'estado', width: 10 },
+          { header: 'POP', key: 'pop', width: 15 },
+          { header: 'OLT', key: 'olt', width: 15 },
+          { header: 'SLOT', key: 'slot', width: 10 },
+          { header: 'PON', key: 'pon', width: 10 },
+          { header: 'ID_CTO', key: 'id_cto', width: 20 },
+          { header: 'CTO', key: 'cto', width: 30 },
+          { header: 'LATITUDE', key: 'latitude', width: 15 },
+          { header: 'LONGITUDE', key: 'longitude', width: 15 },
+          { header: 'STATUS_CTO', key: 'status_cto', width: 15 },
+          { header: 'DATA_CADASTRO', key: 'data_cadastro', width: 15 },
+          { header: 'PORTAS', key: 'portas', width: 10 },
+          { header: 'OCUPADO', key: 'ocupado', width: 10 },
+          { header: 'LIVRE', key: 'livre', width: 10 },
+          { header: 'PCT_OCUP', key: 'pct_ocup', width: 12 }
+        ];
+        
+        // Buscar dados do Supabase em lotes e adicionar diretamente ao Excel
+        // NÃO carrega todos os dados na memória de uma vez
+        const BATCH_SIZE = 1000; // Tamanho do lote do Supabase
+        let offset = 0;
+        let hasMore = true;
+        let batchNumber = 0;
+        let totalProcessed = 0;
+        
+        console.log(`📥 [Supabase] Buscando ${count} CTOs em lotes de ${BATCH_SIZE} e gerando Excel em streaming...`);
+        
+        while (hasMore) {
+          batchNumber++;
+          
+          // Buscar lote do Supabase
+          const { data, error } = await supabase
+            .from('ctos')
+            .select('*')
+            .order('created_at', { ascending: false })
+            .range(offset, offset + BATCH_SIZE - 1);
+          
+          if (error) {
+            console.error(`❌ [Supabase] Erro ao buscar lote ${batchNumber}:`, error);
+            throw error;
+          }
+          
+          if (!data || data.length === 0) {
+            hasMore = false;
+            break;
+          }
+          
+          // Converter e adicionar lote ao worksheet (processa em memória apenas o lote atual)
+          data.forEach(row => {
+            // Converter tipos (mesma lógica da função readCTOsFromSupabase)
+            let latitude = row.latitude;
+            if (latitude !== null && latitude !== undefined) {
+              latitude = typeof latitude === 'number' ? latitude : parseFloat(latitude);
+              if (isNaN(latitude)) latitude = '';
+            } else {
+              latitude = '';
+            }
+            
+            let longitude = row.longitude;
+            if (longitude !== null && longitude !== undefined) {
+              longitude = typeof longitude === 'number' ? longitude : parseFloat(longitude);
+              if (isNaN(longitude)) longitude = '';
+            } else {
+              longitude = '';
+            }
+            
+            let portas = row.portas;
+            if (portas !== null && portas !== undefined) {
+              portas = typeof portas === 'number' ? portas : parseInt(portas);
+              if (isNaN(portas)) portas = '';
+            } else {
+              portas = '';
+            }
+            
+            let ocupado = row.ocupado;
+            if (ocupado !== null && ocupado !== undefined) {
+              ocupado = typeof ocupado === 'number' ? ocupado : parseInt(ocupado);
+              if (isNaN(ocupado)) ocupado = '';
+            } else {
+              ocupado = '';
+            }
+            
+            let livre = row.livre;
+            if (livre !== null && livre !== undefined) {
+              livre = typeof livre === 'number' ? livre : parseInt(livre);
+              if (isNaN(livre)) livre = '';
+            } else {
+              livre = '';
+            }
+            
+            let pct_ocup = row.pct_ocup;
+            if (pct_ocup !== null && pct_ocup !== undefined) {
+              pct_ocup = typeof pct_ocup === 'number' ? pct_ocup : parseFloat(pct_ocup);
+              if (isNaN(pct_ocup)) pct_ocup = '';
+            } else {
+              pct_ocup = '';
+            }
+            
+            let data_cadastro = row.data_cadastro;
+            if (data_cadastro !== null && data_cadastro !== undefined) {
+              if (data_cadastro instanceof Date) {
+                data_cadastro = data_cadastro.toISOString().split('T')[0];
+              } else if (typeof data_cadastro === 'string') {
+                data_cadastro = data_cadastro;
+              } else {
+                data_cadastro = String(data_cadastro);
+              }
+            } else {
+              data_cadastro = '';
+            }
+            
+            // Adicionar linha ao worksheet
+            worksheet.addRow({
+              cid_rede: row.cid_rede ? String(row.cid_rede) : '',
+              estado: row.estado ? String(row.estado) : '',
+              pop: row.pop ? String(row.pop) : '',
+              olt: row.olt ? String(row.olt) : '',
+              slot: row.slot ? String(row.slot) : '',
+              pon: row.pon ? String(row.pon) : '',
+              id_cto: row.id_cto ? String(row.id_cto) : '',
+              cto: row.cto ? String(row.cto) : '',
+              latitude: latitude !== '' ? latitude : '',
+              longitude: longitude !== '' ? longitude : '',
+              status_cto: row.status_cto ? String(row.status_cto) : '',
+              data_cadastro: data_cadastro,
+              portas: portas !== '' ? portas : '',
+              ocupado: ocupado !== '' ? ocupado : '',
+              livre: livre !== '' ? livre : '',
+              pct_ocup: pct_ocup !== '' ? pct_ocup : ''
+            });
+          });
+          
+          totalProcessed += data.length;
+          
+          // Log de progresso
+          if (batchNumber % 10 === 0 || totalProcessed === count) {
+            console.log(`📊 [Supabase] Progresso: ${totalProcessed} / ${count} CTOs processadas (${Math.round((totalProcessed / count) * 100)}%)`);
+          }
+          
+          // Se retornou menos que o tamanho do lote, não há mais dados
+          if (data.length < BATCH_SIZE) {
+            hasMore = false;
+            break;
+          }
+          
+          offset += BATCH_SIZE;
+          
+          // Forçar garbage collection a cada 10 lotes (para liberar memória)
+          if (global.gc && batchNumber % 10 === 0) {
+            global.gc();
+          }
+        }
+        
+        // Escrever Excel diretamente na resposta HTTP (streaming)
+        console.log(`✅ [Supabase] Gerando Excel final com ${totalProcessed} CTOs...`);
+        await workbook.xlsx.write(res);
+        
+        console.log(`✅ [Supabase] Excel gerado e enviado via streaming: ${totalProcessed} CTOs`);
         return;
-      } catch (excelErr) {
-        console.error('❌ [Supabase] Erro ao gerar Excel do Supabase, usando fallback:', excelErr);
-        console.error('❌ [Supabase] Stack:', excelErr.stack);
+      } catch (supabaseErr) {
+        console.error('❌ [Supabase] Erro ao gerar Excel do Supabase, usando fallback:', supabaseErr);
+        console.error('❌ [Supabase] Stack:', supabaseErr.stack);
         // Continuar com fallback Excel
       }
     } else {
-      console.log('⚠️ [Base] Supabase não disponível ou erro, tentando fallback Excel...');
+      console.log('⚠️ [Base] Supabase não disponível, tentando fallback Excel...');
     }
     
     // Fallback: servir arquivo Excel do disco
