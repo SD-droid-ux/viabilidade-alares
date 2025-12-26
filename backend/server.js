@@ -2498,11 +2498,12 @@ async function processExcelStreaming(filePath, supabaseClient) {
   let totalValid = 0;
   let totalInvalid = 0;
   let importedRows = 0;
-  const BATCH_SIZE = 500; // Tamanho do lote reduzido para economizar memória (era 2000)
+  const BATCH_SIZE = 2500; // Tamanho otimizado para velocidade (Supabase suporta até 5000, mas 2500 é o ponto ideal)
   let currentBatch = [];
   let batchNumber = 0;
   let headers = {};
   let isFirstRow = true;
+  const startTime = Date.now();
   
   // Função auxiliar para converter data
   const parseDate = (value) => {
@@ -2538,7 +2539,7 @@ async function processExcelStreaming(filePath, supabaseClient) {
     return mapping[lower] || lower;
   };
   
-  // Função para inserir lote no Supabase
+  // Função para inserir lote no Supabase (otimizada para velocidade)
   const insertBatch = async (batch) => {
     if (batch.length === 0) return;
     
@@ -2553,15 +2554,18 @@ async function processExcelStreaming(filePath, supabaseClient) {
     }
     
     importedRows += batch.length;
-    console.log(`✅ [Streaming] Lote ${batchNumber} importado: ${batch.length} CTOs (total: ${importedRows})`);
     
-    // Forçar garbage collection após cada inserção para liberar memória
-    if (global.gc) {
-      global.gc();
+    // Log apenas a cada 5 lotes para não sobrecarregar (melhor performance)
+    if (batchNumber % 5 === 0 || batchNumber === 1) {
+      const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+      const rate = elapsed > 0 ? (importedRows / elapsed).toFixed(0) : '0';
+      console.log(`✅ [Streaming] Lote ${batchNumber}: ${batch.length} CTOs | Total: ${importedRows} | Taxa: ${rate} CTOs/s`);
     }
     
-    // Pequena pausa para dar tempo ao garbage collector
-    await new Promise(resolve => setImmediate(resolve));
+    // GC apenas a cada 20 lotes (não a cada lote para não perder velocidade)
+    if (batchNumber % 20 === 0 && global.gc) {
+      global.gc();
+    }
   };
   
   try {
@@ -2570,7 +2574,7 @@ async function processExcelStreaming(filePath, supabaseClient) {
     // Usar streaming reader do exceljs - NÃO carrega arquivo inteiro na memória
     const stream = fs.createReadStream(filePath);
     const workbookReader = new ExcelJS.stream.xlsx.WorkbookReader(stream, {
-      sharedStrings: 'emit', // Emitir strings compartilhadas em vez de cache (economiza memória)
+      sharedStrings: 'cache', // Cache para melhor performance (com 4GB de memória pode usar cache)
       hyperlinks: 'ignore', // Ignorar hyperlinks
       styles: 'ignore', // Ignorar estilos
       worksheets: 'emit' // Emitir worksheets como streams
@@ -2658,13 +2662,6 @@ async function processExcelStreaming(filePath, supabaseClient) {
             if (currentBatch.length >= BATCH_SIZE) {
               await insertBatch(currentBatch);
               currentBatch = []; // Limpar batch explicitamente
-              
-              // Log de progresso a cada 10 lotes
-              if (batchNumber % 10 === 0) {
-                const memUsage = process.memoryUsage();
-                const memMB = Math.round(memUsage.heapUsed / 1024 / 1024);
-                console.log(`📊 [Streaming] Progresso: ${importedRows} CTOs importadas | Memória: ${memMB}MB`);
-              }
             }
           } else {
             totalInvalid++;
@@ -2673,16 +2670,12 @@ async function processExcelStreaming(filePath, supabaseClient) {
           totalInvalid++;
         }
         
-        // Log de progresso a cada 5000 linhas (mais frequente para monitorar memória)
-        if (processedRows % 5000 === 0) {
+        // Log de progresso a cada 20000 linhas (menos frequente = mais rápido)
+        if (processedRows % 20000 === 0) {
+          const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
           const memUsage = process.memoryUsage();
           const memMB = Math.round(memUsage.heapUsed / 1024 / 1024);
-          console.log(`📊 [Streaming] Progresso: ${processedRows} linhas processadas (${totalValid} válidas, ${totalInvalid} inválidas) | Memória: ${memMB}MB`);
-          
-          // Forçar GC a cada 50k linhas processadas
-          if (processedRows % 50000 === 0 && global.gc) {
-            global.gc();
-          }
+          console.log(`📊 [Streaming] ${processedRows} linhas processadas | ${importedRows} importadas | ${memMB}MB | ${elapsed}s`);
         }
       }
     }
@@ -2692,8 +2685,10 @@ async function processExcelStreaming(filePath, supabaseClient) {
       await insertBatch(currentBatch);
     }
     
+    const totalTime = ((Date.now() - startTime) / 1000).toFixed(1);
+    const avgRate = totalRows > 0 ? (importedRows / (totalTime / 60)).toFixed(0) : 0;
     console.log(`📊 [Streaming] Processamento concluído: ${totalRows} linhas, ${totalValid} válidas, ${totalInvalid} inválidas`);
-    console.log(`✅ [Streaming] ${importedRows} CTOs importadas no Supabase`);
+    console.log(`✅ [Streaming] ${importedRows} CTOs importadas no Supabase em ${totalTime}s (média: ~${avgRate} CTOs/min)`);
     
     return {
       totalRows,
