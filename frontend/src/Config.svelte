@@ -1822,13 +1822,6 @@
     transform: translateY(0);
   }
 
-  .section-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 1rem;
-  }
-
   .add-projetista-section {
     margin-top: 1rem;
     display: flex;
@@ -1983,3 +1976,92 @@
     display: inline-block;
     padding: 0.875rem 1.5rem;
     background: linear-gradient(135deg, #7B68EE 0%, #6495ED 100%);
+    color: white;
+    border-radius: 8px;
+    cursor: pointer;
+    font-weight: 600;
+    font-size: 0.95rem;
+    transition: all 0.3s ease;
+    box-shadow: 0 4px 6px rgba(123, 104, 238, 0.3);
+  }
+
+  .upload-label:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 12px rgba(123, 104, 238, 0.4);
+  }
+
+  .upload-label:active {
+    transform: translateY(0);
+  }
+
+  .upload-hint {
+    font-size: 0.875rem;
+    color: #666;
+    margin: 0.75rem 0;
+    line-height: 1.5;
+  }
+
+  .last-modified-text {
+    font-size: 0.875rem;
+    color: #7B68EE;
+    margin: 1rem 0 0.5rem 0;
+    font-weight: 600;
+  }
+
+  .upload-status {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.75rem;
+    margin: 1rem 0;
+    padding: 1rem;
+    background: rgba(123, 104, 238, 0.1);
+    border-radius: 8px;
+    color: #7B68EE;
+    font-size: 0.9rem;
+    font-weight: 500;
+    border: 1px solid rgba(123, 104, 238, 0.2);
+  }
+
+  .loading-spinner {
+    width: 20px;
+    height: 20px;
+    border: 3px solid rgba(123, 104, 238, 0.2);
+    border-top-color: #7B68EE;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+  }
+
+  @keyframes spin {
+    to { transform: rotate(360deg); }
+  }
+
+  .upload-message {
+    margin: 1rem 0;
+    padding: 1rem;
+    border-radius: 8px;
+    font-size: 0.9rem;
+    line-height: 1.5;
+    white-space: pre-line;
+    font-weight: 500;
+  }
+
+  .upload-message.success {
+    background: rgba(76, 175, 80, 0.1);
+    border: 1px solid #4CAF50;
+    color: #2e7d32;
+  }
+
+  .upload-message.error {
+    background: rgba(244, 67, 54, 0.1);
+    border: 1px solid #F44336;
+    color: #c62828;
+  }
+
+  .upload-message.processing {
+    background: rgba(123, 104, 238, 0.1);
+    border: 1px solid #7B68EE;
+    color: #5a4fcf;
+  }
+</style>
+
