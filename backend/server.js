@@ -405,10 +405,12 @@ if (fs.existsSync(OLD_BASE) && !fs.existsSync(BASE_CTOS_FILE)) {
 async function readCTOsFromSupabase() {
   try {
     if (!supabase || !isSupabaseAvailable()) {
+      console.log('⚠️ [Supabase] Supabase não disponível, retornando null para fallback');
       return null; // Retorna null para indicar que deve usar fallback
     }
     
-    console.log('📂 [Supabase] Carregando CTOs do Supabase...');
+    console.log('📂 [Supabase] ===== CARREGANDO CTOs DO SUPABASE =====');
+    console.log('📂 [Supabase] Verificando conexão e disponibilidade...');
     
     const { data, error } = await supabase
       .from('ctos')
@@ -417,39 +419,140 @@ async function readCTOsFromSupabase() {
     
     if (error) {
       console.error('❌ [Supabase] Erro ao ler CTOs:', error);
+      console.error('❌ [Supabase] Código do erro:', error.code);
+      console.error('❌ [Supabase] Mensagem:', error.message);
+      if (error.details) {
+        console.error('❌ [Supabase] Detalhes:', error.details);
+      }
+      if (error.hint) {
+        console.error('❌ [Supabase] Dica:', error.hint);
+      }
       return null; // Fallback para Excel
     }
     
     if (!data || data.length === 0) {
       console.log('⚠️ [Supabase] Nenhuma CTO encontrada no Supabase (retornando array vazio)');
+      console.log('⚠️ [Supabase] Isso indica que Supabase está funcionando, mas a tabela está vazia');
       return []; // Retornar array vazio (não null) para indicar que Supabase está funcionando, mas vazio
     }
     
-    // Converter para formato Excel (mesma estrutura do arquivo)
-    const excelData = (data || []).map(row => ({
-      cid_rede: row.cid_rede || '',
-      estado: row.estado || '',
-      pop: row.pop || '',
-      olt: row.olt || '',
-      slot: row.slot || '',
-      pon: row.pon || '',
-      id_cto: row.id_cto || '',
-      cto: row.cto || '',
-      latitude: row.latitude || '',
-      longitude: row.longitude || '',
-      status_cto: row.status_cto || '',
-      data_cadastro: row.data_cadastro || '',
-      portas: row.portas || '',
-      ocupado: row.ocupado || '',
-      livre: row.livre || '',
-      pct_ocup: row.pct_ocup || ''
-    }));
+    console.log(`📊 [Supabase] ${data.length} CTOs encontradas no Supabase`);
+    console.log('📊 [Supabase] Convertendo dados para formato Excel...');
     
-    console.log(`✅ [Supabase] ${excelData.length} CTOs carregadas do Supabase`);
+    // Converter para formato Excel (mesma estrutura do arquivo)
+    // IMPORTANTE: Garantir que valores numéricos sejam convertidos corretamente
+    const excelData = (data || []).map((row, index) => {
+      // Converter latitude e longitude (críticos para o frontend)
+      let latitude = row.latitude;
+      if (latitude !== null && latitude !== undefined) {
+        latitude = typeof latitude === 'number' ? latitude : parseFloat(latitude);
+        if (isNaN(latitude)) latitude = '';
+      } else {
+        latitude = '';
+      }
+      
+      let longitude = row.longitude;
+      if (longitude !== null && longitude !== undefined) {
+        longitude = typeof longitude === 'number' ? longitude : parseFloat(longitude);
+        if (isNaN(longitude)) longitude = '';
+      } else {
+        longitude = '';
+      }
+      
+      // Converter portas, ocupado, livre (números inteiros)
+      let portas = row.portas;
+      if (portas !== null && portas !== undefined) {
+        portas = typeof portas === 'number' ? portas : parseInt(portas);
+        if (isNaN(portas)) portas = '';
+      } else {
+        portas = '';
+      }
+      
+      let ocupado = row.ocupado;
+      if (ocupado !== null && ocupado !== undefined) {
+        ocupado = typeof ocupado === 'number' ? ocupado : parseInt(ocupado);
+        if (isNaN(ocupado)) ocupado = '';
+      } else {
+        ocupado = '';
+      }
+      
+      let livre = row.livre;
+      if (livre !== null && livre !== undefined) {
+        livre = typeof livre === 'number' ? livre : parseInt(livre);
+        if (isNaN(livre)) livre = '';
+      } else {
+        livre = '';
+      }
+      
+      // Converter pct_ocup (número decimal)
+      let pct_ocup = row.pct_ocup;
+      if (pct_ocup !== null && pct_ocup !== undefined) {
+        pct_ocup = typeof pct_ocup === 'number' ? pct_ocup : parseFloat(pct_ocup);
+        if (isNaN(pct_ocup)) pct_ocup = '';
+      } else {
+        pct_ocup = '';
+      }
+      
+      // Converter data_cadastro (formato string ou Date)
+      let data_cadastro = row.data_cadastro;
+      if (data_cadastro !== null && data_cadastro !== undefined) {
+        if (data_cadastro instanceof Date) {
+          // Se for Date, converter para string no formato YYYY-MM-DD
+          data_cadastro = data_cadastro.toISOString().split('T')[0];
+        } else if (typeof data_cadastro === 'string') {
+          // Se for string, manter como está (já deve estar no formato correto)
+          data_cadastro = data_cadastro;
+        } else {
+          data_cadastro = String(data_cadastro);
+        }
+      } else {
+        data_cadastro = '';
+      }
+      
+      // Converter outros campos (strings)
+      const excelRow = {
+        cid_rede: row.cid_rede ? String(row.cid_rede) : '',
+        estado: row.estado ? String(row.estado) : '',
+        pop: row.pop ? String(row.pop) : '',
+        olt: row.olt ? String(row.olt) : '',
+        slot: row.slot ? String(row.slot) : '',
+        pon: row.pon ? String(row.pon) : '',
+        id_cto: row.id_cto ? String(row.id_cto) : '',
+        cto: row.cto ? String(row.cto) : '',
+        latitude: latitude !== '' ? latitude : '',
+        longitude: longitude !== '' ? longitude : '',
+        status_cto: row.status_cto ? String(row.status_cto) : '',
+        data_cadastro: data_cadastro,
+        portas: portas !== '' ? portas : '',
+        ocupado: ocupado !== '' ? ocupado : '',
+        livre: livre !== '' ? livre : '',
+        pct_ocup: pct_ocup !== '' ? pct_ocup : ''
+      };
+      
+      // Log de amostra (primeiras 3 linhas)
+      if (index < 3) {
+        console.log(`📋 [Supabase] Exemplo linha ${index + 1}:`, {
+          id_cto: excelRow.id_cto,
+          cto: excelRow.cto,
+          latitude: excelRow.latitude,
+          longitude: excelRow.longitude,
+          portas: excelRow.portas,
+          ocupado: excelRow.ocupado
+        });
+      }
+      
+      return excelRow;
+    });
+    
+    console.log(`✅ [Supabase] ${excelData.length} CTOs convertidas para formato Excel`);
+    console.log('✅ [Supabase] ===== CONVERSÃO CONCLUÍDA =====');
     
     return excelData;
   } catch (err) {
-    console.error('❌ [Supabase] Erro ao ler CTOs:', err);
+    console.error('❌ [Supabase] ===== ERRO AO LER CTOs =====');
+    console.error('❌ [Supabase] Erro:', err.message);
+    console.error('❌ [Supabase] Tipo:', err.name);
+    console.error('❌ [Supabase] Stack:', err.stack);
     return null; // Fallback para Excel
   }
 }
