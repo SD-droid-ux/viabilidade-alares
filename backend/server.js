@@ -601,26 +601,269 @@ app.get('/api/base.xlsx', async (req, res) => {
 // Rota para obter data da última atualização da base de dados
 app.get('/api/base-last-modified', async (req, res) => {
   try {
-    const currentBasePath = await getCurrentBaseFilePath();
-    if (!currentBasePath) {
-      return res.json({
-        success: false,
-        error: 'Arquivo base de dados não encontrado'
+    // Garantir headers CORS
+    const origin = req.headers.origin;
+    if (origin) {
+      res.setHeader('Access-Control-Allow-Origin', origin);
+    } else {
+      res.setHeader('Access-Control-Allow-Origin', '*');
+    }
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+
+    let lastModified = null;
+
+    if (supabase && isSupabaseAvailable()) {
+      // Tentar obter a data da última modificação do Supabase (ex: da tabela upload_history)
+      const { data, error } = await supabase
+        .from('upload_history')
+        .select('uploaded_at')
+        .order('uploaded_at', { ascending: false })
+        .limit(1);
+
+      if (error) {
+        console.warn('⚠️ [API] Erro ao buscar lastModified do Supabase:', error.message);
+        // Fallback para arquivo local se Supabase falhar
+      } else if (data && data.length > 0) {
+        lastModified = data[0].uploaded_at;
+        console.log('✅ [API] LastModified do Supabase:', lastModified);
+      }
+    }
+
+    if (!lastModified) {
+      // Se não obteve do Supabase, tentar do arquivo local
+      const currentBasePath = await findCurrentBaseFile();
+      if (currentBasePath && fs.existsSync(currentBasePath)) {
+        const stats = await fsPromises.stat(currentBasePath);
+        lastModified = stats.mtime.toISOString();
+        console.log('✅ [API] LastModified do arquivo local:', lastModified);
+      } else {
+        console.log('ℹ️ [API] Nenhuma base de dados encontrada para lastModified.');
+      }
+    }
+
+    if (lastModified) {
+      res.json({ success: true, lastModified });
+    } else {
+      res.status(404).json({ success: false, error: 'Nenhuma base de dados encontrada ou modificada.' });
+    }
+  } catch (err) {
+    console.error('❌ [API] Erro ao obter lastModified:', err);
+    
+    // Garantir headers CORS mesmo em erro
+    const origin = req.headers.origin;
+    if (origin) {
+      res.setHeader('Access-Control-Allow-Origin', origin);
+    } else {
+      res.setHeader('Access-Control-Allow-Origin', '*');
+    }
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+    
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Rota para deletar todos os dados da base de dados CTO
+app.delete('/api/base/delete', async (req, res) => {
+  try {
+    // Garantir headers CORS
+    const origin = req.headers.origin;
+    if (origin) {
+      res.setHeader('Access-Control-Allow-Origin', origin);
+    } else {
+      res.setHeader('Access-Control-Allow-Origin', '*');
+    }
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+
+    console.log('🗑️ [API] ===== INICIANDO DELEÇÃO DE BASE DE DADOS =====');
+
+    let deletedFromSupabase = false;
+    let deletedCount = 0;
+
+    // Tentar deletar do Supabase primeiro
+    if (supabase && isSupabaseAvailable()) {
+      try {
+        console.log('🗑️ [API] Deletando CTOs do Supabase...');
+        
+        // Primeiro, verificar quantos registros existem
+        const { count: countBefore } = await supabase
+          .from('ctos')
+          .select('*', { count: 'exact', head: true });
+        
+        console.log(`📊 [API] Registros existentes antes da deleção: ${countBefore || 0}`);
+        
+        if (countBefore && countBefore > 0) {
+          // Deletar TODOS os registros usando uma condição que sempre seja verdadeira
+          let deleteSuccess = false;
+          
+          try {
+            const { error: deleteError, count: countResult } = await supabase
+              .from('ctos')
+              .delete()
+              .gte('created_at', '1970-01-01T00:00:00Z'); // Condição sempre verdadeira
+            
+            if (deleteError) {
+              throw deleteError;
+            }
+            
+            deletedCount = countResult || countBefore;
+            deleteSuccess = true;
+            console.log(`✅ [API] CTOs deletadas: ${deletedCount} registros`);
+          } catch (deleteError) {
+            console.warn('⚠️ [API] Método 1 falhou, tentando método alternativo...', deleteError.message);
+            
+            // Método alternativo: Deletar usando neq com UUID impossível
+            try {
+              const { error: deleteError2, count: countResult2 } = await supabase
+                .from('ctos')
+                .delete()
+                .neq('id', '00000000-0000-0000-0000-000000000000');
+              
+              if (deleteError2) {
+                throw deleteError2;
+              }
+              
+              deletedCount = countResult2 || countBefore;
+              deleteSuccess = true;
+              console.log(`✅ [API] CTOs deletadas (método alternativo): ${deletedCount} registros`);
+            } catch (deleteError2) {
+              console.error('❌ [API] Método alternativo também falhou:', deleteError2);
+              
+              // Método 3: Deletar em lotes (última tentativa)
+              console.log('⚠️ [API] Tentando deletar em lotes...');
+              let deletedInBatches = 0;
+              let batchSize = 1000;
+              let hasMore = true;
+              
+              while (hasMore) {
+                const { data: batch, error: batchError } = await supabase
+                  .from('ctos')
+                  .select('id')
+                  .limit(batchSize);
+                
+                if (batchError) {
+                  throw batchError;
+                }
+                
+                if (!batch || batch.length === 0) {
+                  hasMore = false;
+                  break;
+                }
+                
+                const idsToDelete = batch.map(row => row.id);
+                const { error: batchDeleteError } = await supabase
+                  .from('ctos')
+                  .delete()
+                  .in('id', idsToDelete);
+                
+                if (batchDeleteError) {
+                  throw batchDeleteError;
+                }
+                
+                deletedInBatches += idsToDelete.length;
+                console.log(`🗑️ [API] Lote deletado: ${idsToDelete.length} registros (total: ${deletedInBatches})`);
+                
+                if (batch.length < batchSize) {
+                  hasMore = false;
+                }
+              }
+              
+              deletedCount = deletedInBatches;
+              deleteSuccess = true;
+              console.log(`✅ [API] CTOs deletadas em lotes: ${deletedCount} registros`);
+            }
+          }
+          
+          // Verificar que a deleção foi bem-sucedida
+          const { count: countAfter } = await supabase
+            .from('ctos')
+            .select('*', { count: 'exact', head: true });
+          
+          if (countAfter && countAfter > 0) {
+            console.warn(`⚠️ [API] AINDA EXISTEM ${countAfter} registros após deleção!`);
+            console.warn(`⚠️ [API] Isso pode indicar um problema. Continuando...`);
+          } else {
+            console.log(`✅ [API] Confirmação: Tabela ctos está vazia (${countAfter || 0} registros)`);
+          }
+          
+          deletedFromSupabase = true;
+        } else {
+          console.log(`ℹ️ [API] Tabela ctos já está vazia, nada para deletar`);
+          deletedFromSupabase = true;
+        }
+      } catch (supabaseErr) {
+        console.error('❌ [API] ===== ERRO NA DELEÇÃO SUPABASE =====');
+        console.error('❌ [API] Erro ao deletar do Supabase:', supabaseErr.message);
+        console.error('❌ [API] Tipo do erro:', supabaseErr.name);
+        console.error('❌ [API] Stack:', supabaseErr.stack);
+        if (supabaseErr.details) {
+          console.error('❌ [API] Detalhes:', supabaseErr.details);
+        }
+        if (supabaseErr.hint) {
+          console.error('❌ [API] Dica:', supabaseErr.hint);
+        }
+        // Continuar para tentar deletar arquivos locais (fallback)
+      }
+    } else {
+      console.log('⚠️ [API] Supabase não disponível, pulando deleção do Supabase');
+    }
+
+    // Deletar arquivos locais também (se existirem)
+    try {
+      const allFiles = await fsPromises.readdir(DATA_DIR);
+      const allBaseAtualFiles = allFiles.filter(file => 
+        file.startsWith('base_atual_') && file.endsWith('.xlsx')
+      );
+      
+      if (allBaseAtualFiles.length > 0) {
+        console.log(`🗑️ [API] Deletando ${allBaseAtualFiles.length} arquivo(s) local(is)...`);
+        
+        for (const file of allBaseAtualFiles) {
+          const filePath = path.join(DATA_DIR, file);
+          try {
+            await fsPromises.unlink(filePath);
+            console.log(`✅ [API] Arquivo local removido: ${file}`);
+          } catch (err) {
+            console.error(`❌ [API] Erro ao remover arquivo local ${file}:`, err.message);
+          }
+        }
+      } else {
+        console.log('ℹ️ [API] Nenhum arquivo local encontrado para deletar');
+      }
+    } catch (fileErr) {
+      console.warn('⚠️ [API] Erro ao deletar arquivos locais (não crítico):', fileErr.message);
+    }
+
+    console.log(`✅ [API] ===== DELEÇÃO CONCLUÍDA =====`);
+    
+    if (deletedFromSupabase) {
+      res.json({
+        success: true,
+        message: `Base de dados deletada com sucesso! ${deletedCount > 0 ? `${deletedCount} CTOs removidas.` : 'Tabela já estava vazia.'}`,
+        deletedCount
+      });
+    } else {
+      res.json({
+        success: true,
+        message: 'Tentativa de deleção realizada. Verifique os logs para detalhes.',
+        deletedCount: 0
       });
     }
-    
-    const stats = await fsPromises.stat(currentBasePath);
-    const lastModified = stats.mtime;
-    
-    res.json({
-      success: true,
-      lastModified: lastModified.toISOString()
-    });
   } catch (err) {
-    console.error('Erro ao obter data de modificação:', err);
+    console.error('❌ [API] Erro ao deletar base de dados:', err);
+    console.error('❌ [API] Stack:', err.stack);
+    
+    // Garantir headers CORS mesmo em erro
+    const origin = req.headers.origin;
+    if (origin) {
+      res.setHeader('Access-Control-Allow-Origin', origin);
+    } else {
+      res.setHeader('Access-Control-Allow-Origin', '*');
+    }
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+    
     res.status(500).json({
       success: false,
-      error: 'Erro ao obter data de modificação'
+      error: `Erro ao deletar base de dados: ${err.message || 'Erro desconhecido'}`
     });
   }
 });
@@ -2329,16 +2572,112 @@ app.post('/api/upload-base', (req, res, next) => {
             
             // Deletar todas as CTOs existentes antes de importar
             console.log('🗑️ [Background] Limpando CTOs antigas do Supabase...');
-            const { error: deleteError, count: deleteCount } = await supabase
-              .from('ctos')
-              .delete()
-              .neq('id', 0);
             
-            if (deleteError) {
-              console.error('❌ [Background] Erro ao limpar CTOs antigas:', deleteError);
-              throw deleteError;
+            // Primeiro, verificar quantos registros existem
+            const { count: countBefore } = await supabase
+              .from('ctos')
+              .select('*', { count: 'exact', head: true });
+            
+            console.log(`📊 [Background] Registros existentes antes da limpeza: ${countBefore || 0}`);
+            
+            if (countBefore && countBefore > 0) {
+              // Deletar TODOS os registros usando uma condição que sempre seja verdadeira
+              // Método 1: Usar gte com created_at (sempre verdadeiro para timestamps)
+              let deleteSuccess = false;
+              let deleteCount = 0;
+              
+              try {
+                const { error: deleteError, count: countResult } = await supabase
+                  .from('ctos')
+                  .delete()
+                  .gte('created_at', '1970-01-01T00:00:00Z'); // Condição sempre verdadeira
+                
+                if (deleteError) {
+                  throw deleteError;
+                }
+                
+                deleteCount = countResult || countBefore;
+                deleteSuccess = true;
+                console.log(`✅ [Background] CTOs deletadas: ${deleteCount} registros`);
+              } catch (deleteError) {
+                console.warn('⚠️ [Background] Método 1 falhou, tentando método alternativo...', deleteError.message);
+                
+                // Método 2: Deletar usando neq com UUID impossível
+                try {
+                  const { error: deleteError2, count: countResult2 } = await supabase
+                    .from('ctos')
+                    .delete()
+                    .neq('id', '00000000-0000-0000-0000-000000000000');
+                  
+                  if (deleteError2) {
+                    throw deleteError2;
+                  }
+                  
+                  deleteCount = countResult2 || countBefore;
+                  deleteSuccess = true;
+                  console.log(`✅ [Background] CTOs deletadas (método alternativo): ${deleteCount} registros`);
+                } catch (deleteError2) {
+                  console.error('❌ [Background] Método alternativo também falhou:', deleteError2);
+                  
+                  // Método 3: Deletar em lotes (última tentativa)
+                  console.log('⚠️ [Background] Tentando deletar em lotes...');
+                  let deletedInBatches = 0;
+                  let batchSize = 1000;
+                  let hasMore = true;
+                  
+                  while (hasMore) {
+                    const { data: batch, error: batchError } = await supabase
+                      .from('ctos')
+                      .select('id')
+                      .limit(batchSize);
+                    
+                    if (batchError) {
+                      throw batchError;
+                    }
+                    
+                    if (!batch || batch.length === 0) {
+                      hasMore = false;
+                      break;
+                    }
+                    
+                    const idsToDelete = batch.map(row => row.id);
+                    const { error: batchDeleteError } = await supabase
+                      .from('ctos')
+                      .delete()
+                      .in('id', idsToDelete);
+                    
+                    if (batchDeleteError) {
+                      throw batchDeleteError;
+                    }
+                    
+                    deletedInBatches += idsToDelete.length;
+                    console.log(`🗑️ [Background] Lote deletado: ${idsToDelete.length} registros (total: ${deletedInBatches})`);
+                    
+                    if (batch.length < batchSize) {
+                      hasMore = false;
+                    }
+                  }
+                  
+                  deleteCount = deletedInBatches;
+                  deleteSuccess = true;
+                  console.log(`✅ [Background] CTOs deletadas em lotes: ${deleteCount} registros`);
+                }
+              }
+              
+              // Verificar que a deleção foi bem-sucedida
+              const { count: countAfter } = await supabase
+                .from('ctos')
+                .select('*', { count: 'exact', head: true });
+              
+              if (countAfter && countAfter > 0) {
+                console.warn(`⚠️ [Background] AINDA EXISTEM ${countAfter} registros após deleção!`);
+                console.warn(`⚠️ [Background] Isso pode indicar um problema. Continuando com importação...`);
+              } else {
+                console.log(`✅ [Background] Confirmação: Tabela ctos está vazia (${countAfter || 0} registros)`);
+              }
+            } else {
+              console.log(`ℹ️ [Background] Tabela ctos já está vazia, pulando deleção`);
             }
-            console.log(`✅ [Background] CTOs antigas removidas (${deleteCount || 'N/A'} registros)`);
             
             // Processar usando streaming (exceljs) - NÃO carrega arquivo inteiro na memória
             const result = await processExcelStreaming(tempFilePath, supabase);
