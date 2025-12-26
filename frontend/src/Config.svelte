@@ -40,6 +40,8 @@
   let uploadSuccess = false;
   let baseLastModified = null;
   let uploadPollInterval = null; // Intervalo de polling para verificar status
+  let showDeleteBaseModal = false; // Modal de confirmação para deletar base
+  let deletingBase = false; // Flag para indicar que está deletando base
 
   // Carregar dados do localStorage primeiro (instantâneo)
   function loadFromLocalStorage() {
@@ -363,6 +365,88 @@
     }
   }
 
+  // Função para fechar modal de deletar base
+  function closeDeleteBaseModal() {
+    showDeleteBaseModal = false;
+  }
+
+  // Função para deletar base atual
+  async function deleteBase() {
+    closeDeleteBaseModal();
+    deletingBase = true;
+    uploadMessage = '';
+    uploadSuccess = false;
+
+    try {
+      const apiUrl = getApiUrl('/api/base/delete');
+      console.log('🗑️ [Delete] Deletando base de dados...');
+      console.log('🔗 [Delete] URL:', apiUrl);
+
+      const response = await fetch(apiUrl, {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+
+      console.log('📥 [Delete] Resposta recebida:', response.status, response.statusText);
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('❌ [Delete] Erro HTTP:', response.status, errorText);
+        
+        try {
+          const errorData = JSON.parse(errorText);
+          throw new Error(errorData.error || `Erro ao deletar base (${response.status})`);
+        } catch {
+          throw new Error(`Erro ao deletar base (${response.status}): ${errorText.substring(0, 200)}`);
+        }
+      }
+
+      const data = await response.json();
+      console.log('✅ [Delete] Dados recebidos:', data);
+
+      if (data.success) {
+        uploadSuccess = true;
+        uploadMessage = data.message || 'Base de dados deletada com sucesso!';
+        baseLastModified = null;
+        baseDataExists = false;
+        
+        // Limpar localStorage
+        try {
+          localStorage.removeItem('baseLastModified');
+        } catch (err) {
+          console.error('Erro ao limpar localStorage:', err);
+        }
+        
+        // Recarregar os dados das CTOs (vai retornar vazio agora)
+        if (onReloadCTOs) {
+          try {
+            await onReloadCTOs();
+            console.log('✅ Base de dados recarregada após deleção');
+          } catch (err) {
+            console.error('Erro ao recarregar base de dados:', err);
+          }
+        }
+      } else {
+        uploadSuccess = false;
+        uploadMessage = data.error || 'Erro ao deletar base de dados';
+      }
+    } catch (err) {
+      uploadSuccess = false;
+      
+      if (err.name === 'TypeError' && err.message.includes('Failed to fetch')) {
+        uploadMessage = 'Não foi possível conectar ao servidor. Verifique se o backend está online.';
+      } else {
+        uploadMessage = `Erro ao deletar base: ${err.message}`;
+      }
+      
+      console.error('❌ [Delete] Erro ao deletar base:', err);
+    } finally {
+      deletingBase = false;
+    }
+  }
+
   // Função para fechar tela de configurações
   function closeSettings() {
     // Limpar polling se estiver ativo
@@ -373,6 +457,8 @@
     uploadMessage = '';
     uploadSuccess = false;
     uploadingBase = false;
+    showDeleteBaseModal = false;
+    deletingBase = false;
     if (onClose) {
       onClose();
     }
@@ -1139,6 +1225,17 @@
           </div>
           <p class="upload-hint">Selecione um arquivo Excel (.xlsx ou .xls) com a estrutura da base atual</p>
           
+          <div class="delete-base-container" style="margin-top: 1rem;">
+            <button 
+              class="btn-delete-base" 
+              on:click={() => showDeleteBaseModal = true}
+              disabled={deletingBase || uploadingBase}
+              title="Deletar todos os dados da base de dados CTO"
+            >
+              🗑️ Deletar Base Atual
+            </button>
+          </div>
+          
           {#if baseDataExists && baseLastModified}
             <p class="last-modified-text">
               Última atualização: {baseLastModified.toLocaleDateString('pt-BR', { 
@@ -1349,6 +1446,49 @@
             </button>
           </div>
         </form>
+      </div>
+    </div>
+  </div>
+{/if}
+
+<!-- Modal de Confirmação de Exclusão de Base -->
+{#if showDeleteBaseModal}
+  <div 
+    class="modal-overlay confirm-overlay" 
+    on:click={closeDeleteBaseModal}
+    on:keydown={(e) => e.key === 'Escape' && closeDeleteBaseModal()}
+    role="button"
+    tabindex="-1"
+    aria-label="Fechar modal"
+  >
+    <div 
+      class="modal-content confirm-modal" 
+      on:click|stopPropagation
+      on:keydown={(e) => e.stopPropagation()}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="confirm-delete-base-title"
+    >
+      <div class="modal-header">
+        <h2 id="confirm-delete-base-title">Confirmar Exclusão</h2>
+        <button class="modal-close" on:click={closeDeleteBaseModal} aria-label="Fechar modal">×</button>
+      </div>
+
+      <div class="modal-body">
+        <div class="confirm-message">
+          <p>Deseja realmente <strong>deletar TODOS os dados</strong> da base de dados CTO?</p>
+          <p class="confirm-warning">⚠️ Esta ação é IRREVERSÍVEL e irá apagar todos os dados da tabela <strong>ctos</strong> no Supabase.</p>
+          <p class="confirm-warning">Você precisará fazer upload de uma nova base para restaurar os dados.</p>
+        </div>
+
+        <div class="modal-actions">
+          <button type="button" class="btn-cancel" on:click={closeDeleteBaseModal} disabled={deletingBase}>
+            Cancelar
+          </button>
+          <button type="button" class="btn-delete-confirm" on:click={deleteBase} disabled={deletingBase}>
+            {deletingBase ? 'Deletando...' : 'Sim, Deletar Base'}
+          </button>
+        </div>
       </div>
     </div>
   </div>
@@ -2112,6 +2252,54 @@
     background: rgba(123, 104, 238, 0.1);
     border: 1px solid #7B68EE;
     color: #5a4fcf;
+  }
+
+  .delete-base-container {
+    display: flex;
+    justify-content: center;
+    margin-top: 1rem;
+  }
+
+  .btn-delete-base {
+    width: 100%;
+    padding: 0.75rem 1.5rem;
+    background: linear-gradient(135deg, #F44336 0%, #E53935 100%);
+    color: white;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    font-weight: 600;
+    font-size: 0.9rem;
+    transition: all 0.3s ease;
+    box-shadow: 0 4px 6px rgba(244, 67, 54, 0.3);
+    font-family: 'Inter', sans-serif;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+  }
+
+  .btn-delete-base:hover:not(:disabled) {
+    background: linear-gradient(135deg, #EF5350 0%, #E53935 100%);
+    transform: translateY(-2px);
+    box-shadow: 0 6px 12px rgba(244, 67, 54, 0.4);
+  }
+
+  .btn-delete-base:active:not(:disabled) {
+    transform: translateY(0);
+  }
+
+  .btn-delete-base:disabled {
+    background: #ccc;
+    cursor: not-allowed;
+    opacity: 0.6;
+  }
+
+  .btn-delete-base:focus {
+    outline: none;
+    box-shadow: 
+      0 0 0 3px rgba(244, 67, 54, 0.2),
+      0 4px 6px rgba(244, 67, 54, 0.3);
   }
 </style>
 
