@@ -1929,7 +1929,7 @@ async function processExcelStreaming(filePath, supabaseClient) {
   let totalValid = 0;
   let totalInvalid = 0;
   let importedRows = 0;
-  const BATCH_SIZE = 1000; // Tamanho do lote para Supabase
+  const BATCH_SIZE = 2000; // Tamanho do lote para Supabase (aumentado para melhor performance)
   let currentBatch = [];
   let batchNumber = 0;
   let headers = {};
