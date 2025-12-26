@@ -611,6 +611,107 @@ async function readCTOsFromSupabase() {
   }
 }
 
+// Nova rota OTIMIZADA: Buscar CTOs próximas por coordenadas (não carrega todas)
+// Esta é a solução para resolver o problema de memória - busca apenas CTOs próximas
+app.get('/api/ctos/nearby', async (req, res) => {
+  try {
+    // Garantir headers CORS
+    const origin = req.headers.origin;
+    if (origin) {
+      res.setHeader('Access-Control-Allow-Origin', origin);
+    } else {
+      res.setHeader('Access-Control-Allow-Origin', '*');
+    }
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+    
+    const lat = parseFloat(req.query.lat);
+    const lng = parseFloat(req.query.lng);
+    const radiusMeters = parseFloat(req.query.radius || 1000); // Default 1km (garante que pegamos as de 250m)
+    
+    if (isNaN(lat) || isNaN(lng)) {
+      return res.status(400).json({ error: 'Latitude e longitude são obrigatórios' });
+    }
+    
+    console.log(`🔍 [API] Buscando CTOs próximas de (${lat}, ${lng}) em raio de ${radiusMeters}m`);
+    
+    if (supabase && isSupabaseAvailable()) {
+      try {
+        // Calcular bounding box (caixa delimitadora) para filtrar eficientemente
+        // Aproximação: 1 grau ≈ 111km, então radiusMeters/111000 graus
+        const radiusDegrees = radiusMeters / 111000;
+        const latMin = lat - radiusDegrees;
+        const latMax = lat + radiusDegrees;
+        const lngMin = lng - radiusDegrees;
+        const lngMax = lng + radiusDegrees;
+        
+        // Buscar CTOs dentro da bounding box primeiro (muito eficiente com índice)
+        const { data, error } = await supabase
+          .from('ctos')
+          .select('*')
+          .gte('latitude', latMin)
+          .lte('latitude', latMax)
+          .gte('longitude', lngMin)
+          .lte('longitude', lngMax);
+        
+        if (error) {
+          console.error('❌ [API] Erro ao buscar CTOs:', error);
+          throw error;
+        }
+        
+        // Função de cálculo de distância geodésica (Haversine)
+        const calculateDistance = (lat1, lng1, lat2, lng2) => {
+          const R = 6371000; // Raio da Terra em metros
+          const dLat = (lat2 - lat1) * Math.PI / 180;
+          const dLng = (lng2 - lng1) * Math.PI / 180;
+          const a = 
+            Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+            Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+            Math.sin(dLng / 2) * Math.sin(dLng / 2);
+          const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+          return R * c;
+        };
+        
+        // Filtrar por distância exata e calcular distâncias
+        const nearbyCTOs = (data || [])
+          .map(row => {
+            const distance = calculateDistance(lat, lng, parseFloat(row.latitude), parseFloat(row.longitude));
+            return {
+              nome: row.cto || row.id_cto || '',
+              latitude: parseFloat(row.latitude),
+              longitude: parseFloat(row.longitude),
+              vagas_total: row.portas || 0,
+              clientes_conectados: row.ocupado || 0,
+              pct_ocup: row.pct_ocup || 0,
+              cidade: row.cid_rede || '',
+              pop: row.pop || '',
+              id: row.id_cto || row.id?.toString() || '',
+              distancia_metros: Math.round(distance * 100) / 100
+            };
+          })
+          .filter(cto => cto.distancia_metros <= radiusMeters)
+          .sort((a, b) => a.distancia_metros - b.distancia_metros)
+          .slice(0, 10); // Limitar a 10 CTOs mais próximas
+        
+        console.log(`✅ [API] ${nearbyCTOs.length} CTOs encontradas próximas (de ${data?.length || 0} na bounding box)`);
+        
+        return res.json({
+          success: true,
+          ctos: nearbyCTOs,
+          count: nearbyCTOs.length
+        });
+      } catch (supabaseErr) {
+        console.error('❌ [API] Erro ao buscar CTOs do Supabase:', supabaseErr);
+        return res.status(500).json({ error: 'Erro ao buscar CTOs', details: supabaseErr.message });
+      }
+    } else {
+      return res.status(503).json({ error: 'Supabase não disponível' });
+    }
+  } catch (err) {
+    console.error('❌ [API] Erro na rota /api/ctos/nearby:', err);
+    return res.status(500).json({ error: 'Erro interno', details: err.message });
+  }
+});
+
 // Rota para servir o arquivo base.xlsx (tenta Supabase primeiro, fallback para Excel)
 // IMPORTANTE: Esta rota NUNCA serve backups - apenas arquivos base_atual_*.xlsx
 app.get('/api/base.xlsx', async (req, res) => {
@@ -674,76 +775,43 @@ app.get('/api/base.xlsx', async (req, res) => {
           return;
         }
         
-        // IMPORTANTE: ExcelJS mantém TODAS as linhas em memória até escrever
-        // Para evitar erro de memória com 217k+ registros, precisamos usar uma abordagem diferente
-        // Solução: Escrever para arquivo temporário usando streaming do ExcelJS, depois servir o arquivo
+        // SOLUÇÃO OTIMIZADA: Usar XLSX que é mais eficiente em memória
+        // Processar e acumular dados em lotes controlados com GC frequente
         
-        const BATCH_SIZE = 1000; // Batch size otimizado
+        // SOLUÇÃO FINAL: XLSX é mais eficiente, mas ainda precisamos controlar memória
+        // Reduzir batch size e fazer GC muito mais frequente para evitar acúmulo
+        
+        const BATCH_SIZE = 5000; // Batch médio para equilibrar velocidade e memória
         let offset = 0;
         let hasMore = true;
         let batchNumber = 0;
         let totalProcessed = 0;
+        const allRows = []; // Array para acumular linhas
         
-        console.log(`📥 [Supabase] Buscando ${count} CTOs em lotes de ${BATCH_SIZE} e gerando Excel...`);
+        console.log(`📥 [Supabase] Buscando ${count} CTOs em lotes de ${BATCH_SIZE} e gerando Excel com XLSX...`);
         
-        // Criar arquivo temporário para escrita em streaming
-        const tempExcelPath = path.join(DATA_DIR, 'temp', `base_export_${Date.now()}.xlsx`);
-        const tempDir = path.dirname(tempExcelPath);
-        if (!fs.existsSync(tempDir)) {
-          fs.mkdirSync(tempDir, { recursive: true });
-        }
-        
-        // Criar stream writer para escrever Excel em streaming (reduz uso de memória)
-        const stream = fs.createWriteStream(tempExcelPath);
-        const streamWriter = new ExcelJS.stream.xlsx.WorkbookWriter({
-          stream: stream,
-          useStyles: false,
-          useSharedStrings: false
-        });
-        
-        const exportWorksheet = streamWriter.addWorksheet('CTOs');
-        
-        // Adicionar cabeçalhos
-        exportWorksheet.columns = [
-          { header: 'CID_REDE', key: 'cid_rede', width: 15 },
-          { header: 'ESTADO', key: 'estado', width: 10 },
-          { header: 'POP', key: 'pop', width: 15 },
-          { header: 'OLT', key: 'olt', width: 15 },
-          { header: 'SLOT', key: 'slot', width: 10 },
-          { header: 'PON', key: 'pon', width: 10 },
-          { header: 'ID_CTO', key: 'id_cto', width: 20 },
-          { header: 'CTO', key: 'cto', width: 30 },
-          { header: 'LATITUDE', key: 'latitude', width: 15 },
-          { header: 'LONGITUDE', key: 'longitude', width: 15 },
-          { header: 'STATUS_CTO', key: 'status_cto', width: 15 },
-          { header: 'DATA_CADASTRO', key: 'data_cadastro', width: 15 },
-          { header: 'PORTAS', key: 'portas', width: 10 },
-          { header: 'OCUPADO', key: 'ocupado', width: 10 },
-          { header: 'LIVRE', key: 'livre', width: 10 },
-          { header: 'PCT_OCUP', key: 'pct_ocup', width: 12 }
-        ];
-        
-        // Função auxiliar para converter tipos
+        // Função auxiliar para converter tipos (otimizada - sem criar objetos desnecessários)
         const convertValue = (value, type = 'string') => {
           if (value === null || value === undefined) return '';
           if (type === 'number') {
-            const num = typeof value === 'number' ? value : parseFloat(value);
+            if (typeof value === 'number') return value;
+            const num = parseFloat(value);
             return isNaN(num) ? '' : num;
           }
           if (type === 'int') {
-            const num = typeof value === 'number' ? value : parseInt(value);
+            if (typeof value === 'number') return value;
+            const num = parseInt(value);
             return isNaN(num) ? '' : num;
           }
           if (type === 'date') {
-            if (value instanceof Date) {
-              return value.toISOString().split('T')[0];
-            }
+            if (value instanceof Date) return value.toISOString().split('T')[0];
             return String(value);
           }
           return String(value || '');
         };
         
         try {
+          // Processar em lotes e acumular (XLSX gera Excel de forma eficiente quando tudo está pronto)
           while (hasMore) {
             batchNumber++;
             
@@ -764,32 +832,32 @@ app.get('/api/base.xlsx', async (req, res) => {
               break;
             }
             
-            // Converter e adicionar lote ao worksheet (streaming real)
+            // Converter lote e adicionar ao array
             for (const row of data) {
-              exportWorksheet.addRow({
-                cid_rede: convertValue(row.cid_rede),
-                estado: convertValue(row.estado),
-                pop: convertValue(row.pop),
-                olt: convertValue(row.olt),
-                slot: convertValue(row.slot),
-                pon: convertValue(row.pon),
-                id_cto: convertValue(row.id_cto),
-                cto: convertValue(row.cto),
-                latitude: convertValue(row.latitude, 'number'),
-                longitude: convertValue(row.longitude, 'number'),
-                status_cto: convertValue(row.status_cto),
-                data_cadastro: convertValue(row.data_cadastro, 'date'),
-                portas: convertValue(row.portas, 'int'),
-                ocupado: convertValue(row.ocupado, 'int'),
-                livre: convertValue(row.livre, 'int'),
-                pct_ocup: convertValue(row.pct_ocup, 'number')
+              allRows.push({
+                'CID_REDE': convertValue(row.cid_rede),
+                'ESTADO': convertValue(row.estado),
+                'POP': convertValue(row.pop),
+                'OLT': convertValue(row.olt),
+                'SLOT': convertValue(row.slot),
+                'PON': convertValue(row.pon),
+                'ID_CTO': convertValue(row.id_cto),
+                'CTO': convertValue(row.cto),
+                'LATITUDE': convertValue(row.latitude, 'number'),
+                'LONGITUDE': convertValue(row.longitude, 'number'),
+                'STATUS_CTO': convertValue(row.status_cto),
+                'DATA_CADASTRO': convertValue(row.data_cadastro, 'date'),
+                'PORTAS': convertValue(row.portas, 'int'),
+                'OCUPADO': convertValue(row.ocupado, 'int'),
+                'LIVRE': convertValue(row.livre, 'int'),
+                'PCT_OCUP': convertValue(row.pct_ocup, 'number')
               });
             }
             
             totalProcessed += data.length;
             
-            // Log de progresso a cada 20 lotes
-            if (batchNumber % 20 === 0 || totalProcessed === count) {
+            // Log de progresso a cada 10 lotes
+            if (batchNumber % 10 === 0 || totalProcessed === count) {
               const memUsage = process.memoryUsage();
               const memMB = Math.round(memUsage.heapUsed / 1024 / 1024);
               console.log(`📊 [Supabase] Progresso: ${totalProcessed} / ${count} CTOs (${Math.round((totalProcessed / count) * 100)}%) | Memória: ${memMB}MB`);
@@ -803,50 +871,50 @@ app.get('/api/base.xlsx', async (req, res) => {
             
             offset += BATCH_SIZE;
             
-            // GC a cada 50 lotes
-            if (global.gc && batchNumber % 50 === 0) {
+            // GC a cada lote (muito frequente para evitar acúmulo)
+            if (global.gc && batchNumber % 2 === 0) {
               global.gc();
             }
           }
           
-          // Finalizar stream writer
-          await streamWriter.commit();
+          console.log(`📊 [Supabase] Dados carregados (${allRows.length} linhas). Gerando Excel com XLSX...`);
+          const memBeforeGen = process.memoryUsage().heapUsed;
           
-        console.log(`✅ [Supabase] Excel gerado: ${totalProcessed} CTOs`);
-        
-        // Configurar headers antes de servir arquivo
-        res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-        res.setHeader('Content-Disposition', 'attachment; filename="base.xlsx"');
-        
-        // Servir arquivo do disco (streaming real)
-        res.sendFile(path.resolve(tempExcelPath), (err) => {
-          // Limpar arquivo temporário após envio
-          if (err) {
-            console.error('❌ [Supabase] Erro ao enviar arquivo:', err);
-          }
-          // Deletar arquivo temporário em background (não bloquear)
-          fs.unlink(tempExcelPath, (unlinkErr) => {
-            if (unlinkErr) {
-              console.warn('⚠️ [Supabase] Erro ao deletar arquivo temporário:', unlinkErr.message);
-            }
+          // Gerar Excel usando XLSX (muito mais eficiente que ExcelJS)
+          const worksheet = XLSX.utils.json_to_sheet(allRows);
+          const workbook = XLSX.utils.book_new();
+          XLSX.utils.book_append_sheet(workbook, worksheet, 'CTOs');
+          
+          // Gerar buffer do Excel
+          const excelBuffer = XLSX.write(workbook, { 
+            type: 'buffer', 
+            bookType: 'xlsx'
           });
-        });
-        
-        return;
-        } catch (streamErr) {
-          // Limpar arquivo temporário em caso de erro
-          try {
-            if (fs.existsSync(tempExcelPath)) {
-              fs.unlinkSync(tempExcelPath);
-            }
-          } catch (cleanupErr) {
-            console.warn('⚠️ [Supabase] Erro ao limpar arquivo temporário:', cleanupErr.message);
+          
+          // Limpar referências imediatamente
+          allRows.length = 0;
+          
+          // GC após gerar Excel
+          if (global.gc) {
+            global.gc();
           }
-          throw streamErr;
+          
+          const memAfterGen = process.memoryUsage().heapUsed;
+          console.log(`✅ [Supabase] Excel gerado: ${totalProcessed} CTOs | Arquivo: ${Math.round(excelBuffer.length / 1024 / 1024)}MB`);
+          
+          // Configurar headers
+          res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+          res.setHeader('Content-Disposition', 'attachment; filename="base.xlsx"');
+          res.setHeader('Content-Length', excelBuffer.length);
+          
+          // Enviar buffer
+          res.send(excelBuffer);
+          
+          return;
+        } catch (xlsxErr) {
+          console.error('❌ [Supabase] Erro ao gerar Excel com XLSX:', xlsxErr);
+          throw xlsxErr;
         }
-        
-        console.log(`✅ [Supabase] Excel gerado e enviado via streaming: ${totalProcessed} CTOs`);
-        return;
       } catch (supabaseErr) {
         console.error('❌ [Supabase] Erro ao gerar Excel do Supabase, usando fallback:', supabaseErr);
         console.error('❌ [Supabase] Stack:', supabaseErr.stack);
