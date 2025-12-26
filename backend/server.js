@@ -1633,21 +1633,21 @@ app.post('/api/auth/login', async (req, res) => {
         console.error('❌ [Supabase] Erro ao validar login, usando fallback Excel:', supabaseErr);
         // Continuar com fallback Excel
         const projetistas = readProjetistas();
-        
-        // Buscar projetista pelo nome (case insensitive)
-        const projetista = projetistas.find(p => {
-          const nomeProj = typeof p === 'string' ? p : p.nome;
-          return nomeProj.toLowerCase() === usuarioLimpo.toLowerCase();
-        });
-        
-        if (!projetista) {
-          return res.json({ success: false, error: 'Usuário ou senha incorretos' });
-        }
-        
-        // Verificar senha
-        const senhaProj = typeof projetista === 'string' ? '' : projetista.senha;
-        if (senhaProj !== senhaLimpa) {
-          return res.json({ success: false, error: 'Usuário ou senha incorretos' });
+    
+    // Buscar projetista pelo nome (case insensitive)
+    const projetista = projetistas.find(p => {
+      const nomeProj = typeof p === 'string' ? p : p.nome;
+      return nomeProj.toLowerCase() === usuarioLimpo.toLowerCase();
+    });
+    
+    if (!projetista) {
+      return res.json({ success: false, error: 'Usuário ou senha incorretos' });
+    }
+    
+    // Verificar senha
+    const senhaProj = typeof projetista === 'string' ? '' : projetista.senha;
+    if (senhaProj !== senhaLimpa) {
+      return res.json({ success: false, error: 'Usuário ou senha incorretos' });
         }
       }
     } else {
@@ -2157,11 +2157,11 @@ app.post('/api/upload-base', (req, res, next) => {
       try {
         console.log('🔍 [Background] Iniciando processamento do arquivo...');
         console.log('ℹ️ [Background] Validação será feita durante processamento em chunks (economiza memória)');
-        
-        // Obter data atual para nomear arquivos
-        const now = new Date();
-        const dateStr = formatDateForFilename(now);
-        
+
+    // Obter data atual para nomear arquivos
+    const now = new Date();
+    const dateStr = formatDateForFilename(now);
+    
         // Tentar importar para Supabase ANTES de salvar arquivo Excel
         let supabaseImported = false;
         let importedRows = 0;
@@ -2423,9 +2423,11 @@ app.post('/api/upload-base', (req, res, next) => {
               }
             }
             
-            // Limpar referências para liberar memória
-            workbook.SheetNames = null;
-            workbook.Sheets = null;
+            // Limpar referências para liberar memória (workbook já foi limpo antes)
+            if (workbookRef) {
+              workbookRef.SheetNames = null;
+              workbookRef.Sheets = null;
+            }
             worksheet = null;
             range = null;
             
@@ -2492,9 +2494,9 @@ app.post('/api/upload-base', (req, res, next) => {
         const currentBasePath = await findCurrentBaseFile();
         
         // 3. Se existe base atual, criar backup ANTES de deletar
-        if (currentBasePath) {
-          const backupFileName = `backup_${dateStr}.xlsx`;
-          const newBackupPath = path.join(DATA_DIR, backupFileName);
+    if (currentBasePath) {
+      const backupFileName = `backup_${dateStr}.xlsx`;
+      const newBackupPath = path.join(DATA_DIR, backupFileName);
           
           // Criar backup da base atual (renomear ou copiar)
           try {
@@ -2580,9 +2582,9 @@ app.post('/api/upload-base', (req, res, next) => {
         
         // 7. Salvar NOVA base como base_atual_DD-MM-YYYY.xlsx
         // OTIMIZAÇÃO: Mover arquivo temporário em vez de copiar (mais rápido e usa menos memória)
-        const newBaseFileName = `base_atual_${dateStr}.xlsx`;
-        const newBasePath = path.join(DATA_DIR, newBaseFileName);
-        
+    const newBaseFileName = `base_atual_${dateStr}.xlsx`;
+    const newBasePath = path.join(DATA_DIR, newBaseFileName);
+    
         console.log(`💾 [Background] Movendo arquivo temporário para: ${newBaseFileName} (${fileSize} bytes)`);
         
         // Mover arquivo temporário para a localização final (mais eficiente que copiar)
@@ -2907,7 +2909,7 @@ app.get('/api/users/online', async (req, res) => {
     res.setHeader('Access-Control-Allow-Credentials', 'true');
     
     if (!res.headersSent) {
-      res.status(500).json({ success: false, error: err.message });
+    res.status(500).json({ success: false, error: err.message });
     }
   }
 });
@@ -2945,7 +2947,7 @@ app.post('/api/users/heartbeat', (req, res) => {
     res.setHeader('Access-Control-Allow-Credentials', 'true');
     
     if (!res.headersSent) {
-      res.status(500).json({ success: false, error: err.message });
+    res.status(500).json({ success: false, error: err.message });
     }
   }
 });
@@ -3262,10 +3264,10 @@ process.on('unhandledRejection', (reason, promise) => {
 try {
   const server = app.listen(PORT, '0.0.0.0', async () => {
     console.log(`🚀 Servidor rodando em http://0.0.0.0:${PORT}`);
-    console.log(`📁 Pasta de dados: ${DATA_DIR}`);
-    console.log(`📁 Arquivo projetistas: ${PROJETISTAS_FILE}`);
-    console.log(`📁 Arquivo base CTOs: ${BASE_CTOS_FILE}`);
-    console.log(`📁 Arquivo tabulações: ${TABULACOES_FILE}`);
+  console.log(`📁 Pasta de dados: ${DATA_DIR}`);
+  console.log(`📁 Arquivo projetistas: ${PROJETISTAS_FILE}`);
+  console.log(`📁 Arquivo base CTOs: ${BASE_CTOS_FILE}`);
+  console.log(`📁 Arquivo tabulações: ${TABULACOES_FILE}`);
     console.log(`✅ Servidor iniciado com sucesso!`);
     
     // Testar conexão com Supabase na inicialização (não bloqueia)
