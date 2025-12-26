@@ -1970,12 +1970,46 @@ async function saveVIALARecordToSupabase(record) {
     }
     
     console.log('💾 [Supabase] Salvando registro VI ALA no Supabase...');
+    console.log('💾 [Supabase] Dados recebidos:', record);
+    
+    // Converter data do formato "DD/MM/YYYY HH:MM" para "YYYY-MM-DD" (formato PostgreSQL DATE)
+    let dataConvertida = null;
+    if (record['DATA']) {
+      const dataStr = String(record['DATA']).trim();
+      // Tentar vários formatos de data
+      if (dataStr.includes('/')) {
+        // Formato DD/MM/YYYY ou DD/MM/YYYY HH:MM
+        const partes = dataStr.split(' ')[0].split('/'); // Pega só a data, ignora hora
+        if (partes.length === 3) {
+          const dia = partes[0].padStart(2, '0');
+          const mes = partes[1].padStart(2, '0');
+          const ano = partes[2];
+          dataConvertida = `${ano}-${mes}-${dia}`; // PostgreSQL: YYYY-MM-DD
+        }
+      } else if (dataStr.match(/^\d{4}-\d{2}-\d{2}/)) {
+        // Já está no formato YYYY-MM-DD
+        dataConvertida = dataStr.split(' ')[0]; // Pega só a data, ignora hora se houver
+      }
+      
+      if (!dataConvertida) {
+        console.warn('⚠️ [Supabase] Formato de data não reconhecido:', dataStr);
+        // Tentar criar data a partir de string ISO se possível
+        try {
+          const dateObj = new Date(dataStr);
+          if (!isNaN(dateObj.getTime())) {
+            dataConvertida = dateObj.toISOString().split('T')[0]; // YYYY-MM-DD
+          }
+        } catch (e) {
+          console.warn('⚠️ [Supabase] Não foi possível converter data:', e);
+        }
+      }
+    }
     
     // Converter formato Excel para formato Supabase
     const dataToSave = {
       vi_ala: record['VI ALA'] || '',
       ala: record['ALA'] || null,
-      data: record['DATA'] || null,
+      data: dataConvertida, // Data convertida para formato PostgreSQL
       projetista: record['PROJETISTA'] || null,
       cidade: record['CIDADE'] || null,
       endereco: record['ENDEREÇO'] || null,
@@ -1987,6 +2021,8 @@ async function saveVIALARecordToSupabase(record) {
     if (!dataToSave.vi_ala) {
       throw new Error('VI ALA é obrigatório');
     }
+    
+    console.log('💾 [Supabase] Dados formatados para salvar:', dataToSave);
     
     // Inserir no Supabase
     const { error } = await supabase
@@ -3911,7 +3947,7 @@ app.post('/api/vi-ala/save', async (req, res) => {
     res.setHeader('Access-Control-Allow-Credentials', 'true');
     
     console.log('📥 [API] Requisição recebida para salvar VI ALA');
-    console.log('📦 [API] Body recebido:', req.body);
+    console.log('📦 [API] Body recebido do frontend:', req.body);
     
     const { viAla, ala, data, projetista, cidade, endereco, latitude, longitude } = req.body;
     
@@ -3920,6 +3956,7 @@ app.post('/api/vi-ala/save', async (req, res) => {
       return res.status(400).json({ success: false, error: 'VI ALA é obrigatório' });
     }
     
+    // Converter formato frontend para formato interno (Excel)
     const record = {
       'VI ALA': viAla.trim(),
       'ALA': ala || '',
