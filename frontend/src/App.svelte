@@ -86,7 +86,7 @@
   let ctos = []; // CTOs encontradas
   let routes = []; // Rotas desenhadas no mapa
   let loadingCTOs = false; // Loading específico para busca de CTOs
-  let ctosData = []; // Dados das CTOs carregados do XLSX
+  // REMOVIDO: ctosData não é mais necessário - buscamos CTOs sob demanda via API
   let baseDataExists = true; // Indica se a base de dados foi carregada com sucesso
 
   // Dados do endereço do cliente (para pré-preencher formulário)
@@ -259,123 +259,23 @@
     }
   }
 
-  // Função para carregar dados das CTOs do arquivo XLSX
-  async function loadCTOsData() {
+  // Função para verificar se a base de dados está disponível (nova abordagem - não carrega tudo)
+  async function checkBaseAvailable() {
     try {
-      // Verificar/criar base_VI_ALA.xlsx (não bloqueia se falhar)
-      ensureVIALABase().catch(err => {
-        console.warn('Aviso: Não foi possível verificar base VI ALA:', err);
-      });
-      
-      // Carregar arquivo XLSX via API do backend
-      const response = await fetch(getApiUrl('/api/base.xlsx'));
-      if (!response.ok) {
-        baseDataExists = false;
-        throw new Error('Arquivo base.xlsx não encontrado. Coloque o arquivo na pasta backend/data/');
-      }
-
-      const arrayBuffer = await response.arrayBuffer();
-      console.log('📥 [Frontend] Arquivo Excel recebido:', arrayBuffer.byteLength, 'bytes');
-      
-      const workbook = XLSX.read(arrayBuffer, { type: 'array' });
-      const sheetName = workbook.SheetNames[0];
-      const worksheet = workbook.Sheets[sheetName];
-      const data = XLSX.utils.sheet_to_json(worksheet);
-      
-      console.log('📊 [Frontend] Total de linhas no Excel:', data.length);
-      
-      // Verificar se há dados válidos
-      if (!data || data.length === 0) {
-        console.error('❌ [Frontend] Base de dados vazia ou inválida');
-        baseDataExists = false;
-        throw new Error('Base de dados vazia ou inválida');
-      }
-      
-      baseDataExists = true;
-
-      // Normalizar nomes das colunas (case insensitive)
-      const normalizedData = data.map(row => {
-        const normalized = {};
-        for (const key in row) {
-          const lowerKey = key.toLowerCase().trim();
-          normalized[lowerKey] = row[key];
-        }
-        return normalized;
-      });
-
-      console.log('📋 [Frontend] Colunas detectadas:', Object.keys(normalizedData[0] || {}));
-
-      // Mapear colunas do Excel para o formato esperado
-      const ctos = [];
-      let skippedNoCoords = 0;
-      let skippedInvalidCoords = 0;
-      
-      for (const row of normalizedData) {
-        // Identificar latitude e longitude (obrigatórias para funcionamento)
-        let lat = parseFloat(row.latitude || row.lat);
-        let lng = parseFloat(row.longitude || row.long);
-
-        // Pular apenas se não tiver coordenadas válidas (coordenadas são críticas)
-        if (isNaN(lat) || isNaN(lng)) {
-          skippedNoCoords++;
-          continue;
-        }
-        if (lat < -90 || lat > 90 || lng < -180 || lng > 180) {
-          skippedInvalidCoords++;
-          continue;
-        }
-
-        // Identificar nome da CTO (opcional - pode estar vazio)
-        let nome = row.cto || row.id_cto || row.nome || '';
-        // Se não tiver nome, usar ID ou coordenadas como identificador
-        if (!nome || nome.trim() === '') {
-          nome = row.id_cto || row.id || `CTO-${lat.toFixed(6)}-${lng.toFixed(6)}` || 'CTO sem nome';
-        }
-
-        // Identificar vagas total e clientes conectados
-        let vagas_total = parseInt(row.portas || row.vagas_total || 0) || 0;
-        let clientes_conectados = parseInt(row.ocupado || row.clientes_conectados || 0) || 0;
-
-        // Identificar porcentagem de ocupação (pct_ocup)
-        let pct_ocup = parseFloat(row.pct_ocup || row.pct_ocupacao || 0) || 0;
-
-        // Identificar Cidade, POP e ID
-        let cidade = row.cid_rede || row.cidade || row.municipio || row.município || '';
-        let pop = row.pop || row.ponto_de_presença || '';
-        let id = row.id || row.id_cto || row.codigo || '';
-
-        ctos.push({
-          nome: String(nome).trim(),
-          latitude: lat,
-          longitude: lng,
-          vagas_total: vagas_total,
-          clientes_conectados: clientes_conectados,
-          pct_ocup: pct_ocup,
-          cidade: String(cidade).trim() || 'N/A',
-          pop: String(pop).trim() || 'N/A',
-          id: String(id).trim() || 'N/A'
-        });
-      }
-
-      console.log(`✅ [Frontend] CTOs processadas: ${ctos.length} válidas`);
-      console.log(`⚠️ [Frontend] Linhas ignoradas: ${skippedNoCoords} sem coordenadas, ${skippedInvalidCoords} coordenadas inválidas`);
-      
-      // Verificar se pelo menos uma CTO foi carregada
-      if (ctos.length === 0) {
-        console.error('❌ [Frontend] Nenhuma CTO válida foi carregada!');
-        console.error('❌ [Frontend] Total de linhas:', data.length);
-        console.error('❌ [Frontend] Linhas ignoradas:', skippedNoCoords + skippedInvalidCoords);
-        baseDataExists = false;
-      } else {
-        console.log(`✅ [Frontend] Base de dados carregada com sucesso: ${ctos.length} CTOs`);
+      // Verificar se o Supabase está disponível fazendo uma busca simples
+      const testLat = -23.5505; // Coordenada de teste (São Paulo)
+      const testLng = -46.6333;
+      const response = await fetch(getApiUrl(`/api/ctos/nearby?lat=${testLat}&lng=${testLng}&radius=1000`));
+      if (response.ok) {
         baseDataExists = true;
+        return true;
       }
-      
-      return ctos;
-    } catch (err) {
-      console.error('Erro ao carregar CTOs:', err);
       baseDataExists = false;
-      throw err;
+      return false;
+    } catch (err) {
+      console.warn('Aviso: Não foi possível verificar base de dados:', err.message);
+      baseDataExists = false;
+      return false;
     }
   }
 
@@ -488,16 +388,13 @@
       // Pequeno delay para visualização
       await new Promise(resolve => setTimeout(resolve, 500));
       
-      // Etapa 2: Carregando Base de dados
-      loadingMessage = 'Carregando Base de dados';
+      // Etapa 2: Verificando Base de dados (não carrega tudo - apenas verifica disponibilidade)
+      loadingMessage = 'Verificando Base de dados';
       baseDataExists = true; // Resetar estado
       try {
-        ctosData = await loadCTOsData();
-        if (ctosData.length === 0) {
-          baseDataExists = false;
-        }
+        await checkBaseAvailable();
       } catch (err) {
-        console.warn('Aviso: Não foi possível carregar dados das CTOs:', err.message);
+        console.warn('Aviso: Não foi possível verificar base de dados:', err.message);
         baseDataExists = false;
       }
       
@@ -762,15 +659,12 @@
     try {
       await loadGoogleMaps();
       initMap();
-      // Carregar dados das CTOs ao iniciar (não bloqueia se falhar)
+      // Verificar base de dados (não carrega tudo - apenas verifica disponibilidade)
       baseDataExists = true; // Resetar estado
       try {
-        ctosData = await loadCTOsData();
-        if (ctosData.length === 0) {
-          baseDataExists = false;
-        }
+        await checkBaseAvailable();
       } catch (err) {
-        console.warn('Aviso: Não foi possível carregar dados das CTOs:', err.message);
+        console.warn('Aviso: Não foi possível verificar base de dados:', err.message);
         baseDataExists = false;
         // Não definir error aqui para não bloquear o app
         // O erro será mostrado apenas quando tentar buscar CTOs
@@ -1051,12 +945,12 @@
     showSettingsModal = false;
   }
 
-  // Função para recarregar CTOs após upload da base
+  // Função para recarregar/verificar base após upload
   async function reloadCTOsData() {
     try {
-      ctosData = await loadCTOsData();
+      await checkBaseAvailable();
     } catch (err) {
-      console.error('Erro ao recarregar CTOs:', err);
+      console.error('Erro ao verificar base:', err);
     }
   }
 
@@ -1481,11 +1375,6 @@
       return;
     }
 
-    if (ctosData.length === 0) {
-      error = 'Dados das CTOs não foram carregados. Verifique se o arquivo base.xlsx está na pasta backend/data/';
-      return;
-    }
-
     loadingCTOs = true;
     error = null;
 
@@ -1496,44 +1385,41 @@
     await new Promise(resolve => setTimeout(resolve, 50));
 
     try {
-
-      // Calcular distâncias e filtrar CTOs dentro de 250m
-      const validCTOs = [];
-
-      for (const cto of ctosData) {
-        const distanceMeters = calculateGeodesicDistance(
-          clientCoords.lat,
-          clientCoords.lng,
-          cto.latitude,
-          cto.longitude
-        );
-
-        if (distanceMeters <= 250) {
-          validCTOs.push({
-            nome: cto.nome,
-            latitude: cto.latitude,
-            longitude: cto.longitude,
-            vagas_total: cto.vagas_total,
-            clientes_conectados: cto.clientes_conectados,
-            pct_ocup: cto.pct_ocup,
-            cidade: cto.cidade,
-            pop: cto.pop,
-            id: cto.id,
-            distancia_metros: Math.round(distanceMeters * 100) / 100,
-            distancia_km: Math.round((distanceMeters / 1000) * 1000) / 1000
-          });
-        }
+      // NOVA ABORDAGEM: Buscar CTOs próximas via API (muito mais eficiente!)
+      // Busca apenas CTOs dentro de 1km (garante que pegamos as de 250m)
+      console.log(`🔍 [Frontend] Buscando CTOs próximas de (${clientCoords.lat}, ${clientCoords.lng})...`);
+      
+      const response = await fetch(getApiUrl(`/api/ctos/nearby?lat=${clientCoords.lat}&lng=${clientCoords.lng}&radius=1000`));
+      
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || `Erro HTTP ${response.status}`);
       }
-
-      // Ordenar por distância (menor primeiro)
-      validCTOs.sort((a, b) => a.distancia_metros - b.distancia_metros);
-
+      
+      const data = await response.json();
+      
+      if (!data.success || !data.ctos || data.ctos.length === 0) {
+        error = 'Nenhuma CTO encontrada dentro de 1km de distância';
+        loadingCTOs = false;
+        return;
+      }
+      
+      // Filtrar apenas CTOs dentro de 250m (a API retorna até 1km para garantir)
+      const validCTOs = data.ctos
+        .filter(cto => cto.distancia_metros <= 250)
+        .map(cto => ({
+          ...cto,
+          distancia_km: Math.round((cto.distancia_metros / 1000) * 1000) / 1000
+        }));
+      
       if (validCTOs.length === 0) {
         error = 'Nenhuma CTO encontrada dentro de 250m de distância';
         loadingCTOs = false;
         return;
       }
-
+      
+      console.log(`✅ [Frontend] ${validCTOs.length} CTOs encontradas dentro de 250m`);
+      
       // Limitar a no máximo 5 CTOs para calcular distância real
       const ctosToCheck = validCTOs.slice(0, 5);
 
