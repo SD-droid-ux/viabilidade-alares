@@ -6707,6 +6707,17 @@
         return isVisible;
       });
       
+      // Verificar se há CTO fora do limite e preparar texto do total
+      const ctoForaLimite = ctosRuaReport.find(cto => cto.is_out_of_limit);
+      let totalEquipamentosTexto = '';
+      if (ctoForaLimite) {
+        const distancia = ctoForaLimite.distancia_real || ctoForaLimite.distancia_metros || 0;
+        const distanciaTexto = distancia >= 1000 ? `${(distancia / 1000).toFixed(2)} km` : `${Math.round(distancia)} m`;
+        totalEquipamentosTexto = `<p><strong style="font-weight: bold; color: #F44336;">Equipamento encontrado está a ${distanciaTexto} de distância do equipamento.</strong></p>`;
+      } else {
+        totalEquipamentosTexto = `<p><strong>Total:</strong> <span style="font-weight: bold; color: #000000;">${ctosRuaReport.length}</span> <strong style="font-weight: bold; color: #000000;">${ctosRuaReport.length === 1 ? 'Equipamento encontrado' : 'Equipamentos encontrados'} dentro de 250m</strong></p>`;
+      }
+      
       let htmlContent = `
         <html>
           <head>
@@ -6762,7 +6773,7 @@
                   </div>
                 </div>
                 <div class="summary-stats">
-                  <p><strong>Total:</strong> <span style="font-weight: bold; color: #000000;">${ctosRuaReport.length}</span> <strong style="font-weight: bold; color: #000000;">${ctosRuaReport.length === 1 ? 'Equipamento encontrado' : 'Equipamentos encontrados'} dentro de 250m</strong></p>
+                  ${totalEquipamentosTexto}
                   <p><strong>Total de Portas Disponíveis:</strong> <span style="font-weight: bold; color: #000000;">${ctosRuaReport.reduce((sum, cto) => sum + (cto.vagas_total - cto.clientes_conectados), 0)}</span> <strong style="font-weight: bold; color: #000000;">portas</strong></p>
                 </div>
               </div>
