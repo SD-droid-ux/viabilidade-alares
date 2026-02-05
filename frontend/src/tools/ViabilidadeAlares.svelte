@@ -3632,8 +3632,8 @@
               
               // Se estiver fora do limite, criar segmentos independentes (não interligados)
               if (cto.is_out_of_limit) {
-                // Dividir a rota fallback em segmentos independentes (segmentos de 1.5m com gaps de 2m)
-                const routeSegments = createDashedRouteSegments(offsetFallbackPath, 1.5, 2);
+                // Dividir a rota fallback em segmentos independentes (segmentos menores com gaps menores para padrão mais denso)
+                const routeSegments = createDashedRouteSegments(offsetFallbackPath, 1, 0.8);
                 
                 // Criar uma Polyline para cada segmento
                 routeSegments.forEach((segmentPath, segmentIndex) => {
@@ -3761,8 +3761,8 @@
             
             // Se estiver fora do limite, criar segmentos independentes (não interligados)
             if (cto.is_out_of_limit) {
-              // Dividir a rota em segmentos independentes (segmentos de 1.5m com gaps de 2m)
-              const routeSegments = createDashedRouteSegments(offsetPath, 1.5, 2);
+              // Dividir a rota em segmentos independentes (segmentos menores com gaps menores para padrão mais denso)
+              const routeSegments = createDashedRouteSegments(offsetPath, 1, 0.8);
               
               // Criar uma Polyline para cada segmento
               routeSegments.forEach((segmentPath, segmentIndex) => {
@@ -3915,8 +3915,8 @@
             
             // Se estiver fora do limite, criar segmentos independentes (não interligados)
             if (cto.is_out_of_limit) {
-              // Dividir a rota fallback em segmentos independentes (segmentos de 1.5m com gaps de 2m)
-              const routeSegments = createDashedRouteSegments(offsetFallbackPath, 1.5, 2);
+              // Dividir a rota fallback em segmentos independentes (segmentos menores com gaps menores para padrão mais denso)
+              const routeSegments = createDashedRouteSegments(offsetFallbackPath, 1, 0.8);
               
               // Criar uma Polyline para cada segmento
               routeSegments.forEach((segmentPath, segmentIndex) => {
