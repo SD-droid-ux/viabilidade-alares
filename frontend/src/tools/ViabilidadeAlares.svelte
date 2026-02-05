@@ -3575,13 +3575,13 @@
               if (cto.is_out_of_limit) {
                 fallbackRouteConfig.icons = [{
                   icon: {
-                    path: 'M -10,0 L 10,0', // Traço horizontal (dash)
+                    path: 'M -8,0 L 8,0', // Traço horizontal (dash) - comprimento reduzido
                     strokeOpacity: 1,
                     strokeWeight: 6, // Espessura do traço
                     scale: 1
                   },
                   offset: '0%',
-                  repeat: '35px' // Espaçamento entre traços
+                  repeat: '50px' // Espaçamento maior entre traços para evitar interligação
                 }];
               }
               
@@ -3670,16 +3670,16 @@
             
             // Se estiver fora do limite, adicionar estilo tracejado (traços)
             if (cto.is_out_of_limit) {
-              // Criar padrão tracejado usando traços horizontais
+              // Criar padrão tracejado usando traços horizontais separados
               routeConfig.icons = [{
                 icon: {
-                  path: 'M -10,0 L 10,0', // Traço horizontal (dash)
+                  path: 'M -8,0 L 8,0', // Traço horizontal (dash) - comprimento reduzido
                   strokeOpacity: 1,
                   strokeWeight: 6, // Espessura do traço
                   scale: 1
                 },
                 offset: '0%',
-                repeat: '35px' // Espaçamento entre traços
+                repeat: '50px' // Espaçamento maior entre traços para evitar interligação
               }];
             }
             
@@ -3795,13 +3795,13 @@
             if (cto.is_out_of_limit) {
               fallbackRouteConfig.icons = [{
                 icon: {
-                  path: 'M -10,0 L 10,0', // Traço horizontal (dash)
+                  path: 'M -8,0 L 8,0', // Traço horizontal (dash) - comprimento reduzido
                   strokeOpacity: 1,
                   strokeWeight: 6, // Espessura do traço
                   scale: 1
                 },
                 offset: '0%',
-                repeat: '35px' // Espaçamento entre traços
+                repeat: '50px' // Espaçamento maior entre traços para evitar interligação
               }];
             }
             
