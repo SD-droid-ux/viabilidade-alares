@@ -792,6 +792,62 @@
     }
   }
 
+  // Função para dividir um path em segmentos independentes (para rotas tracejadas)
+  // Cria múltiplos segmentos de reta separados ao longo do caminho
+  function createDashedRouteSegments(path, segmentLengthMeters = 25, gapLengthMeters = 15) {
+    if (!path || path.length < 2) {
+      return [];
+    }
+
+    const segments = [];
+    let currentDistance = 0;
+    let segmentStartIndex = 0;
+    let isInSegment = true; // true = estamos em um segmento, false = estamos em um gap
+
+    for (let i = 1; i < path.length; i++) {
+      const prevPoint = path[i - 1];
+      const currPoint = path[i];
+      const segmentDistance = calculateGeodesicDistance(
+        prevPoint.lat, prevPoint.lng,
+        currPoint.lat, currPoint.lng
+      );
+
+      currentDistance += segmentDistance;
+
+      if (isInSegment) {
+        // Estamos em um segmento
+        if (currentDistance >= segmentLengthMeters) {
+          // Finalizar este segmento
+          const segmentPath = path.slice(segmentStartIndex, i + 1);
+          segments.push(segmentPath);
+          
+          // Começar um gap
+          isInSegment = false;
+          segmentStartIndex = i;
+          currentDistance = 0;
+        }
+      } else {
+        // Estamos em um gap
+        if (currentDistance >= gapLengthMeters) {
+          // Finalizar o gap e começar novo segmento
+          isInSegment = true;
+          segmentStartIndex = i;
+          currentDistance = 0;
+        }
+      }
+    }
+
+    // Adicionar último segmento se estivermos em um segmento
+    if (isInSegment && segmentStartIndex < path.length) {
+      const segmentPath = path.slice(segmentStartIndex);
+      if (segmentPath.length >= 2) {
+        segments.push(segmentPath);
+      }
+    }
+
+    return segments;
+  }
+
   // Função auxiliar para calcular distância de um ponto até um segmento de linha (aresta do polígono)
   function calculateDistanceToSegment(pointLat, pointLng, segLat1, segLng1, segLat2, segLng2) {
     // Calcular distâncias até os pontos finais do segmento
@@ -3571,18 +3627,50 @@
                 zIndex: 500 + index
               };
               
-              // Se estiver fora do limite, adicionar estilo tracejado (traços)
+              // Se estiver fora do limite, criar segmentos independentes (não interligados)
               if (cto.is_out_of_limit) {
-                fallbackRouteConfig.icons = [{
-                  icon: {
-                    path: 'M -12,0 L 12,0', // Traço horizontal mais longo para melhor visibilidade
-                    strokeOpacity: 1,
-                    strokeWeight: 7, // Espessura aumentada
-                    scale: 1
-                  },
-                  offset: '0%',
-                  repeat: '65px' // Espaçamento maior entre traços para estilo similar à imagem
-                }];
+                // Dividir a rota fallback em segmentos independentes
+                const routeSegments = createDashedRouteSegments(offsetFallbackPath, 25, 15);
+                
+                // Criar uma Polyline para cada segmento
+                routeSegments.forEach((segmentPath, segmentIndex) => {
+                  const segmentConfig = {
+                    path: segmentPath,
+                    geodesic: true,
+                    strokeColor: routeColor,
+                    strokeOpacity: 0.5,
+                    strokeWeight: 7, // Espessura aumentada para melhor visibilidade
+                    map: map,
+                    zIndex: 500 + index + segmentIndex * 0.01,
+                    editable: false
+                  };
+                  
+                  const segmentPolyline = new google.maps.Polyline(segmentConfig);
+                  routes.push(segmentPolyline);
+                  
+                  // Anexar chave da CTO ao segmento
+                  try {
+                    segmentPolyline.__ctoKey = ctoKey;
+                    segmentPolyline.__isSegment = true;
+                  } catch (e) {
+                    console.error(`❌ Erro ao anexar ctoKey ao segmento fallback:`, e);
+                  }
+                  
+                  // Adicionar listener de clique no segmento
+                  segmentPolyline.addListener('click', (event) => {
+                    const currentRouteIndex = routes.findIndex(r => r === segmentPolyline);
+                    if (currentRouteIndex !== -1) {
+                      console.log(`🖱️ Clique no segmento fallback ${segmentIndex} da rota (CTO: ${cto.nome}, ctoKey: ${ctoKey})`);
+                      handleRouteClick(currentRouteIndex, event);
+                    }
+                  });
+                });
+                
+                console.log(`✅ Criados ${routeSegments.length} segmentos independentes (fallback) para rota de CTO fora do limite: ${cto.nome}`);
+                
+                // Não criar a rota contínua, apenas os segmentos
+                resolve();
+                return;
               }
               
               const routePolyline = new google.maps.Polyline(fallbackRouteConfig);
@@ -3668,19 +3756,50 @@
               editable: editingRoutes // Tornar editável se estiver no modo de edição
             };
             
-            // Se estiver fora do limite, adicionar estilo tracejado (traços)
+            // Se estiver fora do limite, criar segmentos independentes (não interligados)
             if (cto.is_out_of_limit) {
-              // Criar padrão tracejado usando traços horizontais separados (estilo similar à imagem)
-              routeConfig.icons = [{
-                icon: {
-                  path: 'M -12,0 L 12,0', // Traço horizontal mais longo para melhor visibilidade
-                  strokeOpacity: 1,
-                  strokeWeight: 7, // Espessura aumentada
-                  scale: 1
-                },
-                offset: '0%',
-                repeat: '65px' // Espaçamento maior entre traços para estilo similar à imagem
-              }];
+              // Dividir a rota em segmentos independentes
+              const routeSegments = createDashedRouteSegments(offsetPath, 25, 15);
+              
+              // Criar uma Polyline para cada segmento
+              routeSegments.forEach((segmentPath, segmentIndex) => {
+                const segmentConfig = {
+                  path: segmentPath,
+                  geodesic: false,
+                  strokeColor: routeColor,
+                  strokeOpacity: 0.6,
+                  strokeWeight: 7, // Espessura aumentada para melhor visibilidade
+                  map: map,
+                  zIndex: 500 + index + segmentIndex * 0.01, // Z-index ligeiramente diferente para cada segmento
+                  editable: false // Segmentos não são editáveis individualmente
+                };
+                
+                const segmentPolyline = new google.maps.Polyline(segmentConfig);
+                routes.push(segmentPolyline);
+                
+                // Anexar chave da CTO ao segmento
+                try {
+                  segmentPolyline.__ctoKey = ctoKey;
+                  segmentPolyline.__isSegment = true;
+                } catch (e) {
+                  console.error(`❌ Erro ao anexar ctoKey ao segmento:`, e);
+                }
+                
+                // Adicionar listener de clique no segmento
+                segmentPolyline.addListener('click', (event) => {
+                  const currentRouteIndex = routes.findIndex(r => r === segmentPolyline);
+                  if (currentRouteIndex !== -1) {
+                    console.log(`🖱️ Clique no segmento ${segmentIndex} da rota (CTO: ${cto.nome}, ctoKey: ${ctoKey})`);
+                    handleRouteClick(currentRouteIndex, event);
+                  }
+                });
+              });
+              
+              console.log(`✅ Criados ${routeSegments.length} segmentos independentes para rota de CTO fora do limite: ${cto.nome}`);
+              
+              // Não criar a rota contínua, apenas os segmentos
+              resolve();
+              return;
             }
             
             // Desenhar Polyline usando TODOS os pontos detalhados SEM offset
@@ -3791,18 +3910,50 @@
               zIndex: 500 + index
             };
             
-            // Se estiver fora do limite, adicionar estilo tracejado (traços)
+            // Se estiver fora do limite, criar segmentos independentes (não interligados)
             if (cto.is_out_of_limit) {
-              fallbackRouteConfig.icons = [{
-                icon: {
-                  path: 'M -12,0 L 12,0', // Traço horizontal mais longo para melhor visibilidade
-                  strokeOpacity: 1,
-                  strokeWeight: 7, // Espessura aumentada
-                  scale: 1
-                },
-                offset: '0%',
-                repeat: '65px' // Espaçamento maior entre traços para estilo similar à imagem
-              }];
+              // Dividir a rota fallback em segmentos independentes
+              const routeSegments = createDashedRouteSegments(offsetFallbackPath, 25, 15);
+              
+              // Criar uma Polyline para cada segmento
+              routeSegments.forEach((segmentPath, segmentIndex) => {
+                const segmentConfig = {
+                  path: segmentPath,
+                  geodesic: true,
+                  strokeColor: routeColor,
+                  strokeOpacity: 0.5,
+                  strokeWeight: 7, // Espessura aumentada para melhor visibilidade
+                  map: map,
+                  zIndex: 500 + index + segmentIndex * 0.01,
+                  editable: false
+                };
+                
+                const segmentPolyline = new google.maps.Polyline(segmentConfig);
+                routes.push(segmentPolyline);
+                
+                // Anexar chave da CTO ao segmento
+                try {
+                  segmentPolyline.__ctoKey = ctoKey;
+                  segmentPolyline.__isSegment = true;
+                } catch (e) {
+                  console.error(`❌ Erro ao anexar ctoKey ao segmento fallback 2:`, e);
+                }
+                
+                // Adicionar listener de clique no segmento
+                segmentPolyline.addListener('click', (event) => {
+                  const currentRouteIndex = routes.findIndex(r => r === segmentPolyline);
+                  if (currentRouteIndex !== -1) {
+                    console.log(`🖱️ Clique no segmento fallback 2 ${segmentIndex} da rota (CTO: ${cto.nome}, ctoKey: ${ctoKey})`);
+                    handleRouteClick(currentRouteIndex, event);
+                  }
+                });
+              });
+              
+              console.log(`✅ Criados ${routeSegments.length} segmentos independentes (fallback 2) para rota de CTO fora do limite: ${cto.nome}`);
+              
+              // Não criar a rota contínua, apenas os segmentos
+              resolve();
+              return;
             }
             
             const routePolyline = new google.maps.Polyline(fallbackRouteConfig);
