@@ -7227,10 +7227,8 @@
               </div>
               <div class="coverage-info-content">
                 <p>
-                  Nenhuma CTO encontrada dentro de 250m. 
-                  A CTO mais próxima é <strong>{nearestCTOOutsideLimit.nome || 'N/A'}</strong> a 
-                  <strong>{distancia >= 1000 ? `${(distancia / 1000).toFixed(2)} km` : `${Math.round(distancia)} m`}</strong> 
-                  de distância.
+                  Equipamento mais próximo é <strong>{nearestCTOOutsideLimit.nome || 'N/A'}</strong> a 
+                  <strong>{distancia >= 1000 ? `${(distancia / 1000).toFixed(2)} km` : `${Math.round(distancia)} m`}</strong>.
                 </p>
               </div>
             </div>
