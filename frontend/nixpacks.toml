@@ -22,7 +22,8 @@ cmds = [
   # Limpar cache antes do build para garantir build limpo
   "rm -rf .vite dist 2>/dev/null || true",
   # Usar variável de ambiente para timeouts maiores no build
-  "NODE_ENV=production NODE_OPTIONS='--max-old-space-size=4096' npm run build"
+  # Aumentar memória para 6GB e adicionar flags de debug
+  "NODE_ENV=production NODE_OPTIONS='--max-old-space-size=6144' npm run build 2>&1 || (echo 'Build failed, showing error:' && exit 1)"
 ]
 
 [start]
