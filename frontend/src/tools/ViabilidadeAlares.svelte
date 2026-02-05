@@ -8695,6 +8695,7 @@
     -moz-user-select: none;
     -ms-user-select: none;
     cursor: cell;
+    white-space: nowrap; /* Evitar quebra de linha - manter conteúdo em uma única linha */
   }
 
   .results-table .cto-name-cell {
@@ -8817,6 +8818,11 @@
 
   /* Garantir que a célula de Status não quebre linha */
   .results-table td:nth-child(4) {
+    white-space: nowrap;
+  }
+
+  /* Garantir que a célula de Cidade não quebre linha */
+  .results-table td:nth-child(5) {
     white-space: nowrap;
   }
 
