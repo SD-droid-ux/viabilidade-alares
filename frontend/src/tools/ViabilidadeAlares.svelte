@@ -3571,17 +3571,17 @@
                 zIndex: 500 + index
               };
               
-              // Se estiver fora do limite, adicionar estilo pontilhado
+              // Se estiver fora do limite, adicionar estilo tracejado (traços)
               if (cto.is_out_of_limit) {
                 fallbackRouteConfig.icons = [{
                   icon: {
-                    path: 'M 0,-2 0,2', // Linha vertical mais longa para melhor visibilidade
+                    path: 'M -10,0 L 10,0', // Traço horizontal (dash)
                     strokeOpacity: 1,
-                    strokeWeight: 5, // Espessura aumentada
-                    scale: 6 // Escala aumentada para pontos maiores
+                    strokeWeight: 6, // Espessura do traço
+                    scale: 1
                   },
                   offset: '0%',
-                  repeat: '25px' // Espaçamento ajustado para melhor visibilidade
+                  repeat: '35px' // Espaçamento entre traços
                 }];
               }
               
@@ -3668,18 +3668,18 @@
               editable: editingRoutes // Tornar editável se estiver no modo de edição
             };
             
-            // Se estiver fora do limite, adicionar estilo pontilhado
+            // Se estiver fora do limite, adicionar estilo tracejado (traços)
             if (cto.is_out_of_limit) {
-              // Criar padrão pontilhado usando icons (melhorado para maior visibilidade)
+              // Criar padrão tracejado usando traços horizontais
               routeConfig.icons = [{
                 icon: {
-                  path: 'M 0,-2 0,2', // Linha vertical mais longa para melhor visibilidade
+                  path: 'M -10,0 L 10,0', // Traço horizontal (dash)
                   strokeOpacity: 1,
-                  strokeWeight: 5, // Espessura aumentada
-                  scale: 6 // Escala aumentada para pontos maiores
+                  strokeWeight: 6, // Espessura do traço
+                  scale: 1
                 },
                 offset: '0%',
-                repeat: '25px' // Espaçamento ajustado para melhor visibilidade
+                repeat: '35px' // Espaçamento entre traços
               }];
             }
             
@@ -3791,17 +3791,17 @@
               zIndex: 500 + index
             };
             
-            // Se estiver fora do limite, adicionar estilo pontilhado
+            // Se estiver fora do limite, adicionar estilo tracejado (traços)
             if (cto.is_out_of_limit) {
               fallbackRouteConfig.icons = [{
                 icon: {
-                  path: 'M 0,-2 0,2', // Linha vertical mais longa para melhor visibilidade
+                  path: 'M -10,0 L 10,0', // Traço horizontal (dash)
                   strokeOpacity: 1,
-                  strokeWeight: 5, // Espessura aumentada
-                  scale: 6 // Escala aumentada para pontos maiores
+                  strokeWeight: 6, // Espessura do traço
+                  scale: 1
                 },
                 offset: '0%',
-                repeat: '25px' // Espaçamento ajustado para melhor visibilidade
+                repeat: '35px' // Espaçamento entre traços
               }];
             }
             
