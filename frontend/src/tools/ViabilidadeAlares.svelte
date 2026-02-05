@@ -7223,7 +7223,17 @@
                       <button class="info-modal-close" on:click={() => showInfoEquipamentos = false} aria-label="Fechar">×</button>
                     </div>
                     <div class="info-modal-body">
-                      <p>Quantidade total de equipamentos CTO encontrados dentro de um raio de 250 metros do endereço pesquisado.</p>
+                      {#if nearestCTOOutsideLimit && ctosRua.some(cto => cto.is_out_of_limit)}
+                        {@const ctoForaLimite = ctosRua.find(cto => cto.is_out_of_limit) || nearestCTOOutsideLimit}
+                        {@const distancia = ctoForaLimite.distancia_real || ctoForaLimite.distancia_metros || 0}
+                        <p>
+                          Esse equipamento está além da metragem limite padrão para atendimento que é de 250m. 
+                          Com isso o sistema buscou o equipamento mais próximo <strong>{ctoForaLimite.nome || 'N/A'}</strong> 
+                          que está a <strong>{distancia >= 1000 ? `${(distancia / 1000).toFixed(2)} km` : `${Math.round(distancia)} m`}</strong> de distância.
+                        </p>
+                      {:else}
+                        <p>Quantidade total de equipamentos CTO encontrados dentro de um raio de 250 metros do endereço pesquisado.</p>
+                      {/if}
                     </div>
                   </div>
                 </div>
@@ -7270,7 +7280,15 @@
                       <button class="info-modal-close" on:click={() => showInfoPortas = false} aria-label="Fechar">×</button>
                     </div>
                     <div class="info-modal-body">
-                      <p>Soma total de portas disponíveis (não conectadas) de todos os equipamentos CTO encontrados dentro de um raio de 250 metros do endereço pesquisado.</p>
+                      {#if nearestCTOOutsideLimit && ctosRua.some(cto => cto.is_out_of_limit)}
+                        {@const ctoForaLimite = ctosRua.find(cto => cto.is_out_of_limit) || nearestCTOOutsideLimit}
+                        <p>
+                          Soma total de portas disponível do equipamento <strong>{ctoForaLimite.nome || 'N/A'}</strong> 
+                          que se encontra fora da metragem limite padrão para atendimento que é de 250m.
+                        </p>
+                      {:else}
+                        <p>Soma total de portas disponíveis (não conectadas) de todos os equipamentos CTO encontrados dentro de um raio de 250 metros do endereço pesquisado.</p>
+                      {/if}
                     </div>
                   </div>
                 </div>
