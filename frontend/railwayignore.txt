@@ -1,0 +1,54 @@
+# Arquivos ignorados pelo Railway para reduzir tamanho do contexto de build
+# Isso acelera o upload e reduz o tempo de build
+
+# Arquivos de desenvolvimento
+*.md
+README.md
+CHANGELOG.md
+LICENSE
+
+# Arquivos de IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Arquivos de teste
+**/__tests__/
+**/*.test.js
+**/*.test.ts
+**/*.spec.js
+**/*.spec.ts
+
+# Arquivos temporários
+*.tmp
+*.temp
+.cache/
+.vite/
+
+# Documentação
+docs/
+*.md
+!README.md
+
+# Arquivos de configuração local
+.env.local
+.env.development
+.env.test
+
+# Backend (não precisa no frontend)
+../backend/
+
+# Arquivos grandes desnecessários
+**/*.map
+**/*.log
+**/*.lock
+package-lock.json
+yarn.lock
+
+# Assets grandes (se não usados no build)
+**/*.xlsx
+**/*.csv
+**/*.xls
+

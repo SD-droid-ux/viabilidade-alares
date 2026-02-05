@@ -1,0 +1,48 @@
+# Docker ignore para reduzir contexto de build
+# Copiado do .railwayignore para garantir compatibilidade
+
+node_modules
+npm-debug.log
+yarn-error.log
+
+# Arquivos de desenvolvimento
+*.md
+README.md
+CHANGELOG.md
+LICENSE
+
+# Arquivos de IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Arquivos de teste
+**/__tests__/
+**/*.test.js
+**/*.test.ts
+**/*.spec.js
+**/*.spec.ts
+
+# Arquivos temporários
+*.tmp
+*.temp
+.cache/
+.vite/
+dist/
+
+# Backend (não precisa no frontend)
+../backend/
+
+# Arquivos grandes desnecessários
+**/*.map
+**/*.log
+package-lock.json
+yarn.lock
+
+# Assets grandes
+**/*.xlsx
+**/*.csv
+**/*.xls
+

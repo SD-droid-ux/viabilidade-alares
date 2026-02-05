@@ -1,0 +1,30 @@
+[phases.setup]
+nixPkgs = ["nodejs_18", "npm-9_x"]
+
+[variables]
+NODE_ENV = "production"
+
+[phases.install]
+cmds = [
+  # Otimizar configuração do npm para builds mais rápidos
+  "npm config set fetch-retries 2",
+  "npm config set fetch-retry-mintimeout 20000",
+  "npm config set fetch-retry-maxtimeout 120000",
+  "npm config set progress false",
+  "npm config set loglevel error",
+  # Instalar dependências - usar npm ci primeiro (mais rápido e determinístico)
+  # Se falhar, tenta npm install como fallback
+  "npm ci --no-audit --legacy-peer-deps || npm install --no-audit --legacy-peer-deps"
+]
+
+[phases.build]
+cmds = [
+  # Limpar cache antes do build para garantir build limpo
+  "rm -rf .vite dist 2>/dev/null || true",
+  # Usar variável de ambiente para timeouts maiores no build
+  "NODE_ENV=production NODE_OPTIONS='--max-old-space-size=4096' npm run build"
+]
+
+[start]
+cmd = "npm start"
+
