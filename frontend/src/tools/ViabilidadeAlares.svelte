@@ -813,8 +813,8 @@
   }
 
   // Função para dividir um path em segmentos independentes (para rotas tracejadas)
-  // Garante comprimentos exatos: segmentos de 0.8m e gaps de 0.02m
-  function createDashedRouteSegments(path, segmentLengthMeters = 0.8, gapLengthMeters = 0.02) {
+  // Garante comprimentos exatos: segmentos uniformes com gaps uniformes (padrão espaçado)
+  function createDashedRouteSegments(path, segmentLengthMeters = 1.2, gapLengthMeters = 0.8) {
     if (!path || path.length < 2) {
       return [];
     }
@@ -3721,8 +3721,8 @@
               
               // Se estiver fora do limite, criar segmentos independentes (não interligados)
               if (cto.is_out_of_limit) {
-                // Dividir a rota fallback em segmentos independentes (segmentos de 0.8m com gaps de 0.02m para padrão denso)
-                const routeSegments = createDashedRouteSegments(offsetFallbackPath, 0.8, 0.02);
+                // Dividir a rota fallback em segmentos independentes (segmentos de 1.2m com gaps de 0.8m - padrão espaçado uniforme)
+                const routeSegments = createDashedRouteSegments(offsetFallbackPath, 1.2, 0.8);
                 
                 // Criar uma Polyline para cada segmento
                 routeSegments.forEach((segmentPath, segmentIndex) => {
@@ -3850,8 +3850,8 @@
             
             // Se estiver fora do limite, criar segmentos independentes (não interligados)
             if (cto.is_out_of_limit) {
-              // Dividir a rota em segmentos independentes (segmentos de 0.8m com gaps de 0.02m para padrão denso)
-              const routeSegments = createDashedRouteSegments(offsetPath, 0.8, 0.02);
+              // Dividir a rota em segmentos independentes (segmentos de 1.2m com gaps de 0.8m - padrão espaçado uniforme)
+              const routeSegments = createDashedRouteSegments(offsetPath, 1.2, 0.8);
               
               // Criar uma Polyline para cada segmento
               routeSegments.forEach((segmentPath, segmentIndex) => {
@@ -4004,8 +4004,8 @@
             
             // Se estiver fora do limite, criar segmentos independentes (não interligados)
             if (cto.is_out_of_limit) {
-              // Dividir a rota fallback em segmentos independentes (segmentos de 0.8m com gaps de 0.02m para padrão denso)
-              const routeSegments = createDashedRouteSegments(offsetFallbackPath, 0.8, 0.02);
+              // Dividir a rota fallback em segmentos independentes (segmentos de 1.2m com gaps de 0.8m - padrão espaçado uniforme)
+              const routeSegments = createDashedRouteSegments(offsetFallbackPath, 1.2, 0.8);
               
               // Criar uma Polyline para cada segmento
               routeSegments.forEach((segmentPath, segmentIndex) => {
