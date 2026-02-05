@@ -793,15 +793,16 @@
   }
 
   // Função para dividir um path em segmentos independentes (para rotas tracejadas)
-  // Cria múltiplos segmentos de reta separados ao longo do caminho
-  function createDashedRouteSegments(path, segmentLengthMeters = 25, gapLengthMeters = 15) {
+  // Cria um segmento a cada 2 metros ao longo da rota
+  function createDashedRouteSegments(path, segmentLengthMeters = 1.5, gapLengthMeters = 0.5) {
     if (!path || path.length < 2) {
       return [];
     }
 
     const segments = [];
-    let currentDistance = 0;
+    let accumulatedDistance = 0;
     let segmentStartIndex = 0;
+    let segmentStartDistance = 0;
     let isInSegment = true; // true = estamos em um segmento, false = estamos em um gap
 
     for (let i = 1; i < path.length; i++) {
@@ -812,27 +813,29 @@
         currPoint.lat, currPoint.lng
       );
 
-      currentDistance += segmentDistance;
+      accumulatedDistance += segmentDistance;
 
       if (isInSegment) {
         // Estamos em um segmento
-        if (currentDistance >= segmentLengthMeters) {
+        if (accumulatedDistance - segmentStartDistance >= segmentLengthMeters) {
           // Finalizar este segmento
           const segmentPath = path.slice(segmentStartIndex, i + 1);
-          segments.push(segmentPath);
+          if (segmentPath.length >= 2) {
+            segments.push(segmentPath);
+          }
           
           // Começar um gap
           isInSegment = false;
           segmentStartIndex = i;
-          currentDistance = 0;
+          segmentStartDistance = accumulatedDistance;
         }
       } else {
         // Estamos em um gap
-        if (currentDistance >= gapLengthMeters) {
+        if (accumulatedDistance - segmentStartDistance >= gapLengthMeters) {
           // Finalizar o gap e começar novo segmento
           isInSegment = true;
           segmentStartIndex = i;
-          currentDistance = 0;
+          segmentStartDistance = accumulatedDistance;
         }
       }
     }
@@ -3629,8 +3632,8 @@
               
               // Se estiver fora do limite, criar segmentos independentes (não interligados)
               if (cto.is_out_of_limit) {
-                // Dividir a rota fallback em segmentos independentes
-                const routeSegments = createDashedRouteSegments(offsetFallbackPath, 25, 15);
+                // Dividir a rota fallback em segmentos independentes (segmentos de 1.5m com gaps de 2m)
+                const routeSegments = createDashedRouteSegments(offsetFallbackPath, 1.5, 2);
                 
                 // Criar uma Polyline para cada segmento
                 routeSegments.forEach((segmentPath, segmentIndex) => {
@@ -3758,8 +3761,8 @@
             
             // Se estiver fora do limite, criar segmentos independentes (não interligados)
             if (cto.is_out_of_limit) {
-              // Dividir a rota em segmentos independentes
-              const routeSegments = createDashedRouteSegments(offsetPath, 25, 15);
+              // Dividir a rota em segmentos independentes (segmentos de 1.5m com gaps de 2m)
+              const routeSegments = createDashedRouteSegments(offsetPath, 1.5, 2);
               
               // Criar uma Polyline para cada segmento
               routeSegments.forEach((segmentPath, segmentIndex) => {
@@ -3912,8 +3915,8 @@
             
             // Se estiver fora do limite, criar segmentos independentes (não interligados)
             if (cto.is_out_of_limit) {
-              // Dividir a rota fallback em segmentos independentes
-              const routeSegments = createDashedRouteSegments(offsetFallbackPath, 25, 15);
+              // Dividir a rota fallback em segmentos independentes (segmentos de 1.5m com gaps de 2m)
+              const routeSegments = createDashedRouteSegments(offsetFallbackPath, 1.5, 2);
               
               // Criar uma Polyline para cada segmento
               routeSegments.forEach((segmentPath, segmentIndex) => {
