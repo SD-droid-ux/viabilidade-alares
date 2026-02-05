@@ -3575,13 +3575,13 @@
               if (cto.is_out_of_limit) {
                 fallbackRouteConfig.icons = [{
                   icon: {
-                    path: 'M -8,0 L 8,0', // Traço horizontal (dash) - comprimento reduzido
+                    path: 'M -12,0 L 12,0', // Traço horizontal mais longo para melhor visibilidade
                     strokeOpacity: 1,
-                    strokeWeight: 6, // Espessura do traço
+                    strokeWeight: 7, // Espessura aumentada
                     scale: 1
                   },
                   offset: '0%',
-                  repeat: '50px' // Espaçamento maior entre traços para evitar interligação
+                  repeat: '65px' // Espaçamento maior entre traços para estilo similar à imagem
                 }];
               }
               
@@ -3670,16 +3670,16 @@
             
             // Se estiver fora do limite, adicionar estilo tracejado (traços)
             if (cto.is_out_of_limit) {
-              // Criar padrão tracejado usando traços horizontais separados
+              // Criar padrão tracejado usando traços horizontais separados (estilo similar à imagem)
               routeConfig.icons = [{
                 icon: {
-                  path: 'M -8,0 L 8,0', // Traço horizontal (dash) - comprimento reduzido
+                  path: 'M -12,0 L 12,0', // Traço horizontal mais longo para melhor visibilidade
                   strokeOpacity: 1,
-                  strokeWeight: 6, // Espessura do traço
+                  strokeWeight: 7, // Espessura aumentada
                   scale: 1
                 },
                 offset: '0%',
-                repeat: '50px' // Espaçamento maior entre traços para evitar interligação
+                repeat: '65px' // Espaçamento maior entre traços para estilo similar à imagem
               }];
             }
             
@@ -3795,13 +3795,13 @@
             if (cto.is_out_of_limit) {
               fallbackRouteConfig.icons = [{
                 icon: {
-                  path: 'M -8,0 L 8,0', // Traço horizontal (dash) - comprimento reduzido
+                  path: 'M -12,0 L 12,0', // Traço horizontal mais longo para melhor visibilidade
                   strokeOpacity: 1,
-                  strokeWeight: 6, // Espessura do traço
+                  strokeWeight: 7, // Espessura aumentada
                   scale: 1
                 },
                 offset: '0%',
-                repeat: '50px' // Espaçamento maior entre traços para evitar interligação
+                repeat: '65px' // Espaçamento maior entre traços para estilo similar à imagem
               }];
             }
             
