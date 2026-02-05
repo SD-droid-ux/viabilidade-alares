@@ -792,63 +792,148 @@
     }
   }
 
+  // Função auxiliar para interpolar um ponto ao longo de um segmento de linha
+  // Retorna um ponto que está a uma distância específica do ponto inicial
+  function interpolatePointAlongSegment(startLat, startLng, endLat, endLng, targetDistance) {
+    const totalDistance = calculateGeodesicDistance(startLat, startLng, endLat, endLng);
+    if (totalDistance < 0.001) { // Se a distância é muito pequena, retornar o ponto final
+      return { lat: endLat, lng: endLng };
+    }
+    
+    const ratio = targetDistance / totalDistance;
+    if (ratio >= 1) {
+      return { lat: endLat, lng: endLng };
+    }
+    
+    // Interpolação linear simples (suficiente para pequenas distâncias)
+    const lat = startLat + (endLat - startLat) * ratio;
+    const lng = startLng + (endLng - startLng) * ratio;
+    
+    return { lat, lng };
+  }
+
   // Função para dividir um path em segmentos independentes (para rotas tracejadas)
-  // Garante gaps consistentes e segmentos uniformes
-  function createDashedRouteSegments(path, segmentLengthMeters = 0.5, gapLengthMeters = 0.05) {
+  // Garante comprimentos exatos: segmentos de 0.8m e gaps de 0.02m
+  function createDashedRouteSegments(path, segmentLengthMeters = 0.8, gapLengthMeters = 0.02) {
     if (!path || path.length < 2) {
       return [];
     }
 
     const segments = [];
-    let accumulatedDistance = 0;
-    let segmentStartIndex = 0;
-    let segmentStartDistance = 0;
+    let currentPosition = 0; // Posição atual ao longo do path (em metros acumulados)
+    let currentPathIndex = 0; // Índice do ponto atual no path
     let isInSegment = true; // true = estamos em um segmento, false = estamos em um gap
+    let segmentStartPoint = null; // Ponto de início do segmento atual
 
-    for (let i = 1; i < path.length; i++) {
-      const prevPoint = path[i - 1];
-      const currPoint = path[i];
+    while (currentPathIndex < path.length - 1) {
+      const currentPoint = path[currentPathIndex];
+      const nextPoint = path[currentPathIndex + 1];
+      
       const segmentDistance = calculateGeodesicDistance(
-        prevPoint.lat, prevPoint.lng,
-        currPoint.lat, currPoint.lng
+        currentPoint.lat, currentPoint.lng,
+        nextPoint.lat, nextPoint.lng
       );
-
-      accumulatedDistance += segmentDistance;
 
       if (isInSegment) {
         // Estamos em um segmento
-        if (accumulatedDistance - segmentStartDistance >= segmentLengthMeters) {
-          // Finalizar este segmento exatamente no ponto que atinge o comprimento desejado
-          const segmentPath = path.slice(segmentStartIndex, i + 1);
-          if (segmentPath.length >= 2) {
-            segments.push(segmentPath);
-          }
-          
-          // Começar um gap imediatamente após o segmento
+        if (!segmentStartPoint) {
+          // Iniciar novo segmento
+          segmentStartPoint = { ...currentPoint };
+        }
+
+        const distanceFromSegmentStart = currentPosition;
+        const remainingInSegment = segmentLengthMeters - distanceFromSegmentStart;
+
+        if (segmentDistance >= remainingInSegment) {
+          // Este segmento de linha contém o ponto final do segmento
+          const endPoint = interpolatePointAlongSegment(
+            currentPoint.lat, currentPoint.lng,
+            nextPoint.lat, nextPoint.lng,
+            remainingInSegment
+          );
+
+          // Criar segmento completo
+          const segmentPath = [segmentStartPoint, endPoint];
+          segments.push(segmentPath);
+
+          // Começar gap a partir do ponto final do segmento
           isInSegment = false;
-          segmentStartIndex = i;
-          segmentStartDistance = accumulatedDistance;
+          segmentStartPoint = null;
+          currentPosition = 0;
+          
+          // Avançar para o ponto onde o gap termina
+          const remainingInLine = segmentDistance - remainingInSegment;
+          if (remainingInLine >= gapLengthMeters) {
+            // O gap termina dentro deste mesmo segmento de linha
+            const gapEndPoint = interpolatePointAlongSegment(
+              endPoint.lat, endPoint.lng,
+              nextPoint.lat, nextPoint.lng,
+              gapLengthMeters
+            );
+            // Começar novo segmento imediatamente após o gap
+            segmentStartPoint = { ...gapEndPoint };
+            isInSegment = true;
+            currentPosition = 0;
+            // Calcular distância restante no segmento de linha após o gap
+            const distanceAfterGap = calculateGeodesicDistance(
+              gapEndPoint.lat, gapEndPoint.lng,
+              nextPoint.lat, nextPoint.lng
+            );
+            if (distanceAfterGap > 0.001) {
+              currentPosition = distanceAfterGap;
+            }
+            currentPathIndex++;
+          } else {
+            // O gap continua no próximo segmento de linha
+            currentPosition = remainingInLine;
+            currentPathIndex++;
+          }
+        } else {
+          // Este segmento de linha ainda está dentro do segmento atual
+          currentPosition += segmentDistance;
+          currentPathIndex++;
         }
       } else {
-        // Estamos em um gap - garantir que o gap seja exatamente o tamanho especificado
-        if (accumulatedDistance - segmentStartDistance >= gapLengthMeters) {
-          // Finalizar o gap e começar novo segmento
+        // Estamos em um gap
+        const distanceFromGapStart = currentPosition;
+        const remainingInGap = gapLengthMeters - distanceFromGapStart;
+
+        if (segmentDistance >= remainingInGap) {
+          // Este segmento de linha contém o ponto final do gap
+          const gapEndPoint = interpolatePointAlongSegment(
+            currentPoint.lat, currentPoint.lng,
+            nextPoint.lat, nextPoint.lng,
+            remainingInGap
+          );
+
+          // Começar novo segmento a partir do ponto final do gap
           isInSegment = true;
-          segmentStartIndex = i;
-          segmentStartDistance = accumulatedDistance;
+          segmentStartPoint = { ...gapEndPoint };
+          currentPosition = 0;
+          
+          // Avançar para o próximo ponto
+          const remainingInLine = segmentDistance - remainingInGap;
+          currentPosition = remainingInLine;
+          currentPathIndex++;
+        } else {
+          // Este segmento de linha ainda está dentro do gap
+          currentPosition += segmentDistance;
+          currentPathIndex++;
         }
       }
     }
 
-    // Adicionar último segmento se estivermos em um segmento (apenas se tiver comprimento mínimo)
-    if (isInSegment && segmentStartIndex < path.length) {
-      const segmentPath = path.slice(segmentStartIndex);
-      if (segmentPath.length >= 2) {
-        // Verificar se o último segmento tem pelo menos 50% do comprimento desejado
-        const lastSegmentDistance = accumulatedDistance - segmentStartDistance;
-        if (lastSegmentDistance >= segmentLengthMeters * 0.5) {
-          segments.push(segmentPath);
-        }
+    // Adicionar último segmento se estivermos em um segmento e tiver comprimento mínimo
+    if (isInSegment && segmentStartPoint && currentPathIndex < path.length) {
+      const lastPoint = path[path.length - 1];
+      const lastSegmentDistance = currentPosition + calculateGeodesicDistance(
+        path[currentPathIndex - 1].lat, path[currentPathIndex - 1].lng,
+        lastPoint.lat, lastPoint.lng
+      );
+      
+      if (lastSegmentDistance >= segmentLengthMeters * 0.3) {
+        const segmentPath = [segmentStartPoint, lastPoint];
+        segments.push(segmentPath);
       }
     }
 
@@ -3636,8 +3721,8 @@
               
               // Se estiver fora do limite, criar segmentos independentes (não interligados)
               if (cto.is_out_of_limit) {
-                // Dividir a rota fallback em segmentos independentes (segmentos de 0.5m com gaps de 0.05m)
-                const routeSegments = createDashedRouteSegments(offsetFallbackPath, 0.5, 0.05);
+                // Dividir a rota fallback em segmentos independentes (segmentos de 0.8m com gaps de 0.02m para padrão denso)
+                const routeSegments = createDashedRouteSegments(offsetFallbackPath, 0.8, 0.02);
                 
                 // Criar uma Polyline para cada segmento
                 routeSegments.forEach((segmentPath, segmentIndex) => {
@@ -3765,8 +3850,8 @@
             
             // Se estiver fora do limite, criar segmentos independentes (não interligados)
             if (cto.is_out_of_limit) {
-              // Dividir a rota em segmentos independentes (segmentos de 0.5m com gaps de 0.05m)
-              const routeSegments = createDashedRouteSegments(offsetPath, 0.5, 0.05);
+              // Dividir a rota em segmentos independentes (segmentos de 0.8m com gaps de 0.02m para padrão denso)
+              const routeSegments = createDashedRouteSegments(offsetPath, 0.8, 0.02);
               
               // Criar uma Polyline para cada segmento
               routeSegments.forEach((segmentPath, segmentIndex) => {
@@ -3919,8 +4004,8 @@
             
             // Se estiver fora do limite, criar segmentos independentes (não interligados)
             if (cto.is_out_of_limit) {
-              // Dividir a rota fallback em segmentos independentes (segmentos de 0.5m com gaps de 0.05m)
-              const routeSegments = createDashedRouteSegments(offsetFallbackPath, 0.5, 0.05);
+              // Dividir a rota fallback em segmentos independentes (segmentos de 0.8m com gaps de 0.02m para padrão denso)
+              const routeSegments = createDashedRouteSegments(offsetFallbackPath, 0.8, 0.02);
               
               // Criar uma Polyline para cada segmento
               routeSegments.forEach((segmentPath, segmentIndex) => {
