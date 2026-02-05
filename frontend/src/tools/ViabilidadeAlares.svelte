@@ -16,6 +16,37 @@
   // Helper para URL da API - usando função do config.js
   // (getApiUrl já foi importado acima)
 
+  // ========== CONSTANTES ==========
+  // Raios de busca de CTOs (em metros)
+  const SEARCH_RADIUS_INITIAL = 250; // Raio inicial de busca
+  const SEARCH_RADIUS_PROGRESSIVE = [500, 700, 900, 1200]; // Raios progressivos
+  const SEARCH_RADIUS_MAX = 5000; // Raio máximo para busca
+  const MAX_CTOS_TO_DISPLAY = 5; // Máximo de CTOs normais a exibir
+  const MAX_CTOS_TO_CHECK = 15; // Máximo de CTOs para calcular rotas
+  
+  // Cores para marcadores e rotas
+  const COLOR_CTO_GREEN = '#4CAF50'; // Verde (0-49.99%)
+  const COLOR_CTO_ORANGE = '#FF9800'; // Laranja (50-79.99%)
+  const COLOR_CTO_RED = '#F44336'; // Vermelho (80-100% ou fora do limite)
+  const COLOR_CTO_OUT_OF_LIMIT = '#FF9800'; // Laranja para CTO fora do limite
+  
+  // Configurações de rota
+  const ROUTE_STROKE_WEIGHT = 4;
+  const ROUTE_STROKE_OPACITY_NORMAL = 0.6;
+  const ROUTE_STROKE_OPACITY_OUT_OF_LIMIT = 0.5;
+  
+  // Configurações de cobertura
+  const COVERAGE_OPACITY_DEFAULT = 0.4;
+  
+  // Configurações de heartbeat
+  const HEARTBEAT_INTERVAL_MS = 120000; // 2 minutos
+  
+  // Limites de ocupação para cores
+  const OCCUPATION_THRESHOLD_LOW = 0;
+  const OCCUPATION_THRESHOLD_MEDIUM = 50;
+  const OCCUPATION_THRESHOLD_HIGH = 80;
+  const OCCUPATION_THRESHOLD_MAX = 100;
+
   let map;
   let googleMapsLoaded = false;
   let searchMode = 'address'; // 'address' ou 'coordinates'
@@ -408,10 +439,8 @@
     return 'N/A';
   }
   
-  // Função para formatar data de criação (formato: MM/YYYY)
-  function formatDataCriacao(cto) {
-    const dataCriacao = cto.data_criacao || cto.data_cadastro || cto.created_at || '';
-    
+  // Função utilitária para formatar data para MM/YYYY (reutilizável)
+  function formatDateToMMYYYY(dataCriacao) {
     // Verificar se está vazio, null ou undefined
     if (!dataCriacao || dataCriacao === 'null' || dataCriacao === 'undefined' || String(dataCriacao).trim() === '') {
       return 'N/A';
@@ -478,6 +507,12 @@
     // Se não conseguiu formatar, retornar N/A
     return 'N/A';
   }
+
+  // Função para formatar data de criação (formato: MM/YYYY)
+  function formatDataCriacao(cto) {
+    const dataCriacao = cto.data_criacao || cto.data_cadastro || cto.created_at || '';
+    return formatDateToMMYYYY(dataCriacao);
+  }
   
   // Função para obter o valor de uma célula baseado em rowIndex e colIndex
   // Nova ordem: 0=Checkbox, 1=N°, 2=CTO, 3=Status, 4=Cidade, 5=POP, 6=CHASSE, 7=PLACA, 8=OLT, 9=ID CTO, 10=Data Criação, 11=Portas Total, 12=Ocupadas, 13=Disponíveis, 14=Ocupação, 15=Latitude, 16=Longitude
@@ -494,72 +529,9 @@
       case 8: return cto.pon || 'N/A'; // OLT (usa campo pon)
       case 9: return (cto.id_cto || cto.id || 'N/A').toString(); // ID CTO
       case 10: {
-        // Data de Criação - formatar se existir (formato: MM/YYYY)
+        // Data de Criação - usar função utilitária para formatação
         const dataCriacao = cto.data_criacao || cto.data_cadastro || cto.created_at || '';
-        if (!dataCriacao || dataCriacao === 'null' || dataCriacao === 'undefined' || String(dataCriacao).trim() === '') {
-          return 'N/A';
-        }
-        
-        // Se for string, verificar se já está no formato MM/YYYY
-        if (typeof dataCriacao === 'string') {
-          const dataStr = dataCriacao.trim();
-          
-          // Verificar se já está no formato MM/YYYY (ex: "04/2023")
-          const mmYYYYMatch = dataStr.match(/^(\d{1,2})\/(\d{4})$/);
-          if (mmYYYYMatch) {
-            const mes = mmYYYYMatch[1].padStart(2, '0');
-            const ano = mmYYYYMatch[2];
-            return `${mes}/${ano}`;
-          }
-          
-          // Tentar formato YYYY-MM (ex: "2023-04")
-          const yyyyMMMatch = dataStr.match(/^(\d{4})-(\d{1,2})$/);
-          if (yyyyMMMatch) {
-            const ano = yyyyMMMatch[1];
-            const mes = yyyyMMMatch[2].padStart(2, '0');
-            return `${mes}/${ano}`;
-          }
-          
-          // Tentar formato YYYY-MM-DD (ex: "2023-04-15")
-          const yyyyMMDDMatch = dataStr.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
-          if (yyyyMMDDMatch) {
-            const ano = yyyyMMDDMatch[1];
-            const mes = yyyyMMDDMatch[2].padStart(2, '0');
-            return `${mes}/${ano}`;
-          }
-          
-          // Tentar formato DD/MM/YYYY (ex: "15/04/2023")
-          const ddMMYYYYMatch = dataStr.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-          if (ddMMYYYYMatch) {
-            const mes = ddMMYYYYMatch[2].padStart(2, '0');
-            const ano = ddMMYYYYMatch[3];
-            return `${mes}/${ano}`;
-          }
-          
-          // Se não bateu com nenhum padrão conhecido e não é uma string vazia, retornar como está
-          if (dataStr.length > 0) {
-            return dataStr;
-          }
-        }
-        
-        // Tentar converter para Date apenas se não for string ou se não bateu com nenhum padrão
-        try {
-          const data = new Date(dataCriacao);
-          if (!isNaN(data.getTime()) && data.getTime() > 0) {
-            // Verificar se a data não é uma data inválida padrão (1970-01-01)
-            const ano = data.getFullYear();
-            if (ano >= 2000 && ano <= 2100) {
-              // Formato: MM/YYYY (apenas mês e ano)
-              const mes = String(data.getMonth() + 1).padStart(2, '0');
-              return `${mes}/${ano}`;
-            }
-          }
-        } catch (e) {
-          // Ignorar erro
-        }
-        
-        // Se não conseguiu formatar, retornar N/A
-        return 'N/A';
+        return formatDateToMMYYYY(dataCriacao);
       }
       case 11: return (cto.vagas_total || 0).toString(); // Portas Total
       case 12: return (cto.clientes_conectados || 0).toString(); // Ocupadas
@@ -4710,7 +4682,8 @@
         
         // Se não existe rota no mapa e a CTO precisa de rota, criar
         // IMPORTANTE: Cada CTO tem sua própria rota, mesmo que compartilhe coordenadas com outras
-        if (!routeExists && !cto.is_condominio && cto.distancia_metros && cto.distancia_metros > 0 && cto.distancia_real) {
+        // Incluir CTOs normais dentro de 250m OU CTOs fora do limite (is_out_of_limit)
+        if (!routeExists && !cto.is_condominio && cto.distancia_metros && cto.distancia_metros > 0 && (cto.distancia_real || cto.is_out_of_limit)) {
           const ctoIndex = ctos.findIndex(c => getCTOKey(c) === ctoKey);
           if (ctoIndex !== -1) {
             console.log(`📍 Criando rota ÚNICA para CTO ${cto.nome} (${ctoKey}) - mesmo que outras CTOs tenham mesma coordenada`);
@@ -4797,7 +4770,13 @@
       const isAtivado = statusCto && statusCto.toUpperCase().trim() === 'ATIVADO';
       ctoColor = isAtivado ? '#28A745' : '#95A5A6';
     } else {
-      ctoColor = getCTOColor(cto.pct_ocup || 0);
+      // Para CTOs normais, usar cor baseada na porcentagem de ocupação
+      // Se estiver fora do limite, usar cor laranja
+      if (cto.is_out_of_limit) {
+        ctoColor = '#FF9800'; // Laranja para CTO fora do limite
+      } else {
+        ctoColor = getCTOColor(cto.pct_ocup || 0);
+      }
     }
     
     // Criar ícone
