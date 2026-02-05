@@ -137,6 +137,8 @@
   // Estado para tooltips de informação
   let showInfoEquipamentos = false;
   let showInfoPortas = false;
+  let showInfoForaCobertura = false;
+  let showInfoForaLimite = false;
 
   // Estado de loading (apenas para esta ferramenta)
   let isLoading = false;
@@ -7144,6 +7146,18 @@
               <div class="coverage-info-header">
                 <span class="coverage-info-icon">⚠️</span>
                 <span class="coverage-info-title">Fora da Área de Cobertura</span>
+                <button 
+                  class="info-icon" 
+                  on:click={() => showInfoForaCobertura = !showInfoForaCobertura}
+                  title="Informação"
+                  aria-label="Informação sobre área de cobertura"
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <circle cx="12" cy="12" r="10" fill="#7B68EE" stroke="#7B68EE" stroke-width="1"/>
+                    <path d="M12 16V12" stroke="white" stroke-width="2" stroke-linecap="round"/>
+                    <circle cx="12" cy="8" r="1" fill="white"/>
+                  </svg>
+                </button>
               </div>
               <div class="coverage-info-content">
                 {#if distanciaValida}
@@ -7153,6 +7167,33 @@
                 {/if}
               </div>
             </div>
+            {#if showInfoForaCobertura}
+              <div 
+                class="info-modal-overlay" 
+                on:click={() => showInfoForaCobertura = false}
+                on:keydown={(e) => e.key === 'Escape' && (showInfoForaCobertura = false)}
+                role="button"
+                tabindex="-1"
+                aria-label="Fechar modal de informação"
+              >
+                <div 
+                  class="info-modal-box" 
+                  on:click|stopPropagation
+                  on:keydown={(e) => e.key === 'Enter' && e.stopPropagation()}
+                  role="dialog"
+                  tabindex="0"
+                  aria-modal="true"
+                >
+                  <div class="info-modal-header">
+                    <h3>Informação</h3>
+                    <button class="info-modal-close" on:click={() => showInfoForaCobertura = false} aria-label="Fechar">×</button>
+                  </div>
+                  <div class="info-modal-body">
+                    <p>O endereço pesquisado está localizado fora da área de cobertura da rede. A distância informada representa a distância em metros ou quilômetros até a área de cobertura mais próxima.</p>
+                  </div>
+                </div>
+              </div>
+            {/if}
           {/if}
           
           {#if clientCoords && isClientCovered === true}
@@ -7171,6 +7212,18 @@
               <div class="coverage-info-header">
                 <span class="coverage-info-icon">📍</span>
                 <span class="coverage-info-title">Fora do Limite</span>
+                <button 
+                  class="info-icon" 
+                  on:click={() => showInfoForaLimite = !showInfoForaLimite}
+                  title="Informação"
+                  aria-label="Informação sobre CTO fora do limite"
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <circle cx="12" cy="12" r="10" fill="#7B68EE" stroke="#7B68EE" stroke-width="1"/>
+                    <path d="M12 16V12" stroke="white" stroke-width="2" stroke-linecap="round"/>
+                    <circle cx="12" cy="8" r="1" fill="white"/>
+                  </svg>
+                </button>
               </div>
               <div class="coverage-info-content">
                 <p>
@@ -7181,6 +7234,38 @@
                 </p>
               </div>
             </div>
+            {#if showInfoForaLimite}
+              <div 
+                class="info-modal-overlay" 
+                on:click={() => showInfoForaLimite = false}
+                on:keydown={(e) => e.key === 'Escape' && (showInfoForaLimite = false)}
+                role="button"
+                tabindex="-1"
+                aria-label="Fechar modal de informação"
+              >
+                <div 
+                  class="info-modal-box" 
+                  on:click|stopPropagation
+                  on:keydown={(e) => e.key === 'Enter' && e.stopPropagation()}
+                  role="dialog"
+                  tabindex="0"
+                  aria-modal="true"
+                >
+                  <div class="info-modal-header">
+                    <h3>Informação</h3>
+                    <button class="info-modal-close" on:click={() => showInfoForaLimite = false} aria-label="Fechar">×</button>
+                  </div>
+                  <div class="info-modal-body">
+                    <p>
+                      Nenhuma CTO foi encontrada dentro do limite padrão de 250 metros do endereço pesquisado. 
+                      O sistema realizou uma busca progressiva e encontrou a CTO mais próxima disponível, 
+                      que está além da metragem limite padrão para atendimento. A distância informada representa 
+                      a distância real calculada através de rotas.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            {/if}
           {/if}
 
           {#if ctos.length > 0}
@@ -9659,6 +9744,36 @@
     font-weight: 600;
     font-size: 0.95rem;
     color: #856404;
+    flex: 1; /* Ocupar espaço disponível para empurrar o botão para a direita */
+  }
+
+  .coverage-info-header .info-icon {
+    margin-left: auto; /* Empurrar o botão para a direita */
+    flex-shrink: 0;
+  }
+
+  /* Botão informativo no box "Fora da Área de Cobertura" - usar cor amarela */
+  .coverage-info-box .coverage-info-header .info-icon svg circle {
+    fill: #ffc107;
+    stroke: #ffc107;
+  }
+
+  .coverage-info-box .coverage-info-header .info-icon:focus {
+    outline: 2px solid #ffc107;
+    outline-offset: 2px;
+    border-radius: 50%;
+  }
+
+  /* Botão informativo no box "Fora do Limite" - usar cor laranja */
+  .coverage-info-box-warning .coverage-info-header .info-icon svg circle {
+    fill: #FF9800;
+    stroke: #FF9800;
+  }
+
+  .coverage-info-box-warning .coverage-info-header .info-icon:focus {
+    outline: 2px solid #FF9800;
+    outline-offset: 2px;
+    border-radius: 50%;
   }
 
   .coverage-info-box-success .coverage-info-title {
