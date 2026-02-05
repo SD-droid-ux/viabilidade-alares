@@ -3575,13 +3575,13 @@
               if (cto.is_out_of_limit) {
                 fallbackRouteConfig.icons = [{
                   icon: {
-                    path: 'M 0,-1 0,1',
+                    path: 'M 0,-2 0,2', // Linha vertical mais longa para melhor visibilidade
                     strokeOpacity: 1,
-                    strokeWeight: 3,
-                    scale: 4
+                    strokeWeight: 5, // Espessura aumentada
+                    scale: 6 // Escala aumentada para pontos maiores
                   },
                   offset: '0%',
-                  repeat: '20px'
+                  repeat: '25px' // Espaçamento ajustado para melhor visibilidade
                 }];
               }
               
@@ -3670,16 +3670,16 @@
             
             // Se estiver fora do limite, adicionar estilo pontilhado
             if (cto.is_out_of_limit) {
-              // Criar padrão pontilhado usando icons
+              // Criar padrão pontilhado usando icons (melhorado para maior visibilidade)
               routeConfig.icons = [{
                 icon: {
-                  path: 'M 0,-1 0,1',
+                  path: 'M 0,-2 0,2', // Linha vertical mais longa para melhor visibilidade
                   strokeOpacity: 1,
-                  strokeWeight: 3,
-                  scale: 4
+                  strokeWeight: 5, // Espessura aumentada
+                  scale: 6 // Escala aumentada para pontos maiores
                 },
                 offset: '0%',
-                repeat: '20px'
+                repeat: '25px' // Espaçamento ajustado para melhor visibilidade
               }];
             }
             
@@ -3795,13 +3795,13 @@
             if (cto.is_out_of_limit) {
               fallbackRouteConfig.icons = [{
                 icon: {
-                  path: 'M 0,-1 0,1',
+                  path: 'M 0,-2 0,2', // Linha vertical mais longa para melhor visibilidade
                   strokeOpacity: 1,
-                  strokeWeight: 3,
-                  scale: 4
+                  strokeWeight: 5, // Espessura aumentada
+                  scale: 6 // Escala aumentada para pontos maiores
                 },
                 offset: '0%',
-                repeat: '20px'
+                repeat: '25px' // Espaçamento ajustado para melhor visibilidade
               }];
             }
             
