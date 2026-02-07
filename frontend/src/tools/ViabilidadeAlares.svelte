@@ -38,7 +38,7 @@
   // Opacidades para rotas tracejadas quando CTO está fora do limite (acima de 250m)
   // Você pode ajustar essas opacidades independentemente
   const ROUTE_ORANGE_OPACITY_OUT_OF_LIMIT = 1.0; // Opacidade dos traços laranja (0.0 a 1.0)
-  const ROUTE_GRAY_OPACITY_OUT_OF_LIMIT = 0.5; // Opacidade dos traços cinza (0.0 a 1.0)
+  const ROUTE_GRAY_OPACITY_OUT_OF_LIMIT = 1.0; // Opacidade dos traços cinza (0.0 a 1.0)
   
   // Configurações de cobertura
   const COVERAGE_OPACITY_DEFAULT = 0.4;
@@ -3637,21 +3637,23 @@
             
             let routePolyline;
             
-            // Se estiver fora do limite, criar padrão alternado de traços laranja e cinza
+            // Se estiver fora do limite, criar traços laranja com espaços vazios entre eles
             if (cto.is_out_of_limit) {
-              // Polyline com traços laranja (começam em 0%)
-              const orangeRouteConfig = {
+              // Polyline com traços laranja tracejados (linha base transparente, apenas traços visíveis)
+              const routeConfig = {
                 path: offsetPath,
-                geodesic: false,
-                strokeColor: '#FF9800', // Laranja
-                strokeOpacity: ROUTE_ORANGE_OPACITY_OUT_OF_LIMIT, // Opacidade configurável
+                geodesic: false, // CRÍTICO: false = seguir exatamente os pontos (não fazer linha reta entre eles)
+                strokeColor: '#FF9800', // Laranja (não será visível pois strokeOpacity é 0)
+                strokeOpacity: 0, // Linha base transparente - apenas os traços (ícones) serão visíveis
                 strokeWeight: 6,
                 map: map,
                 zIndex: 500 + index,
-                editable: false // Apenas a principal será editável
+                editable: editingRoutes // Tornar editável se estiver no modo de edição
               };
               
-              orangeRouteConfig.icons = [{
+              // Traços laranja com espaços vazios entre eles
+              // A cor vem do strokeColor da polyline base, apenas controlamos a opacidade nos ícones
+              routeConfig.icons = [{
                 icon: {
                   path: 'M 0,-4 0,4', // Traço vertical
                   strokeOpacity: ROUTE_ORANGE_OPACITY_OUT_OF_LIMIT, // Opacidade configurável
@@ -3659,47 +3661,10 @@
                   scale: 1
                 },
                 offset: '0%',
-                repeat: '80px' // Espaçamento entre traços
+                repeat: '100px' // Espaçamento maior entre traços para criar gaps visíveis
               }];
               
-              const orangePolyline = new google.maps.Polyline(orangeRouteConfig);
-              routes.push(orangePolyline);
-              
-              // Polyline com traços cinza (começam na metade para alternar)
-              const grayRouteConfig = {
-                path: offsetPath,
-                geodesic: false,
-                strokeColor: '#999999', // Cinza médio
-                strokeOpacity: ROUTE_GRAY_OPACITY_OUT_OF_LIMIT, // Opacidade configurável
-                strokeWeight: 6,
-                map: map,
-                zIndex: 500 + index,
-                editable: false
-              };
-              
-              grayRouteConfig.icons = [{
-                icon: {
-                  path: 'M 0,-4 0,4', // Traço vertical
-                  strokeOpacity: ROUTE_GRAY_OPACITY_OUT_OF_LIMIT, // Opacidade configurável
-                  strokeWeight: 6,
-                  scale: 1
-                },
-                offset: '50%', // Começa na metade para alternar com o laranja
-                repeat: '80px' // Mesmo espaçamento
-              }];
-              
-              const grayPolyline = new google.maps.Polyline(grayRouteConfig);
-              routes.push(grayPolyline);
-              
-              // Usar a polyline laranja como principal para edição e referência
-              routePolyline = orangePolyline;
-              
-              // Anexar referência à polyline cinza na laranja para remoção conjunta
-              try {
-                routePolyline.__grayPolyline = grayPolyline;
-              } catch (e) {
-                console.error(`❌ Erro ao anexar grayPolyline:`, e);
-              }
+              routePolyline = new google.maps.Polyline(routeConfig);
             } else {
               // Configuração da rota normal (dentro do limite)
               const routeConfig = {
@@ -3814,21 +3779,22 @@
             
             let routePolyline;
             
-            // Se estiver fora do limite, criar padrão alternado de traços laranja e cinza
+            // Se estiver fora do limite, criar traços laranja com espaços vazios entre eles
             if (cto.is_out_of_limit) {
-              // Polyline com traços laranja (começam em 0%)
-              const orangeFallbackConfig = {
+              // Polyline com traços laranja tracejados (linha base transparente, apenas traços visíveis)
+              const fallbackRouteConfig = {
                 path: offsetFallbackPath,
                 geodesic: true,
-                strokeColor: '#FF9800', // Laranja
-                strokeOpacity: ROUTE_ORANGE_OPACITY_OUT_OF_LIMIT, // Opacidade configurável
+                strokeColor: '#FF9800', // Laranja (não será visível pois strokeOpacity é 0)
+                strokeOpacity: 0, // Linha base transparente - apenas os traços (ícones) serão visíveis
                 strokeWeight: 5,
                 map: map,
-                zIndex: 500 + index,
-                editable: false
+                zIndex: 500 + index
               };
               
-              orangeFallbackConfig.icons = [{
+              // Traços laranja com espaços vazios entre eles
+              // A cor vem do strokeColor da polyline base, apenas controlamos a opacidade nos ícones
+              fallbackRouteConfig.icons = [{
                 icon: {
                   path: 'M 0,-4 0,4', // Traço vertical
                   strokeOpacity: ROUTE_ORANGE_OPACITY_OUT_OF_LIMIT, // Opacidade configurável
@@ -3836,47 +3802,10 @@
                   scale: 1
                 },
                 offset: '0%',
-                repeat: '80px' // Espaçamento entre traços
+                repeat: '100px' // Espaçamento maior entre traços para criar gaps visíveis
               }];
               
-              const orangePolyline = new google.maps.Polyline(orangeFallbackConfig);
-              routes.push(orangePolyline);
-              
-              // Polyline com traços cinza (começam na metade para alternar)
-              const grayFallbackConfig = {
-                path: offsetFallbackPath,
-                geodesic: true,
-                strokeColor: '#999999', // Cinza médio
-                strokeOpacity: ROUTE_GRAY_OPACITY_OUT_OF_LIMIT, // Opacidade configurável
-                strokeWeight: 5,
-                map: map,
-                zIndex: 500 + index,
-                editable: false
-              };
-              
-              grayFallbackConfig.icons = [{
-                icon: {
-                  path: 'M 0,-4 0,4', // Traço vertical
-                  strokeOpacity: ROUTE_GRAY_OPACITY_OUT_OF_LIMIT, // Opacidade configurável
-                  strokeWeight: 5,
-                  scale: 1
-                },
-                offset: '50%', // Começa na metade para alternar com o laranja
-                repeat: '80px' // Mesmo espaçamento
-              }];
-              
-              const grayPolyline = new google.maps.Polyline(grayFallbackConfig);
-              routes.push(grayPolyline);
-              
-              // Usar a polyline laranja como principal para referência
-              routePolyline = orangePolyline;
-              
-              // Anexar referência à polyline cinza na laranja para remoção conjunta
-              try {
-                routePolyline.__grayPolyline = grayPolyline;
-              } catch (e) {
-                console.error(`❌ Erro ao anexar grayPolyline (fallback):`, e);
-              }
+              routePolyline = new google.maps.Polyline(fallbackRouteConfig);
             } else {
               // Configuração da rota fallback normal (dentro do limite)
               const fallbackRouteConfig = {
@@ -4718,28 +4647,6 @@
     }).filter(item => item.routeIndex !== -1).sort((a, b) => b.routeIndex - a.routeIndex);
     
     routesToRemoveWithIndex.forEach(({ route, routeIndex }) => {
-      // Se a rota tem uma polyline cinza associada (para rotas fora do limite), remover também
-      if (route.__grayPolyline) {
-        try {
-          const grayPolyline = route.__grayPolyline;
-          grayPolyline.setMap(null);
-          // Remover a polyline cinza do array routes também
-          const grayIndex = routes.findIndex(r => r === grayPolyline);
-          if (grayIndex !== -1) {
-            routes.splice(grayIndex, 1);
-            // Ajustar índices se necessário
-            if (editingRouteIndex !== null && editingRouteIndex > grayIndex) {
-              editingRouteIndex--;
-            }
-            if (selectedRouteIndex !== null && selectedRouteIndex > grayIndex) {
-              selectedRouteIndex--;
-            }
-          }
-        } catch (e) {
-          console.warn(`⚠️ Erro ao remover polyline cinza:`, e);
-        }
-      }
-      
       route.setMap(null);
       // Se a rota que está sendo removida estava sendo editada, finalizar edição
       if (editingRouteIndex === routeIndex) {
