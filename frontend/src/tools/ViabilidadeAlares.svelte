@@ -3655,13 +3655,13 @@
               // A cor vem do strokeColor da polyline base, apenas controlamos a opacidade nos ícones
               routeConfig.icons = [{
                 icon: {
-                  path: 'M 0,-2 0,2', // Traço vertical menor
+                  path: 'M 0,-4 0,4', // Traço vertical
                   strokeOpacity: ROUTE_ORANGE_OPACITY_OUT_OF_LIMIT, // Opacidade configurável
                   strokeWeight: 6,
                   scale: 1
                 },
                 offset: '0%',
-                repeat: '30px' // Espaçamento ainda menor para ter mais traços e gaps menores
+                repeat: '25px' // Espaçamento menor entre traços para ter mais traços e gaps menores
               }];
               
               routePolyline = new google.maps.Polyline(routeConfig);
@@ -3796,13 +3796,13 @@
               // A cor vem do strokeColor da polyline base, apenas controlamos a opacidade nos ícones
               fallbackRouteConfig.icons = [{
                 icon: {
-                  path: 'M 0,-2 0,2', // Traço vertical menor
+                  path: 'M 0,-4 0,4', // Traço vertical
                   strokeOpacity: ROUTE_ORANGE_OPACITY_OUT_OF_LIMIT, // Opacidade configurável
                   strokeWeight: 5,
                   scale: 1
                 },
                 offset: '0%',
-                repeat: '30px' // Espaçamento ainda menor para ter mais traços e gaps menores
+                repeat: '50px' // Espaçamento menor entre traços para ter mais traços e gaps menores
               }];
               
               routePolyline = new google.maps.Polyline(fallbackRouteConfig);
