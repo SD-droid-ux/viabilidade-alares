@@ -162,6 +162,106 @@
     '#6366F1', '#8B5CF6', '#EC4899', '#F43F5E', '#EF4444',
     '#F59E0B', '#10B981', '#06B6D4', '#3B82F6', '#6366F1'
   ];
+
+  // Função para calcular dados do gráfico de pizza
+  function getPieChartData(stats, total) {
+    if (!stats || stats.length === 0 || total === 0) {
+      return [];
+    }
+
+    const centerX = 200;
+    const centerY = 200;
+    const radius = 150;
+    let currentAngle = -90; // Começar do topo
+
+    return stats.map(stat => {
+      const sliceAngle = (stat.value / total) * 360;
+      const startAngle = currentAngle;
+      const endAngle = currentAngle + sliceAngle;
+
+      const startAngleRad = (startAngle * Math.PI) / 180;
+      const endAngleRad = (endAngle * Math.PI) / 180;
+
+      const x1 = centerX + radius * Math.cos(startAngleRad);
+      const y1 = centerY + radius * Math.sin(startAngleRad);
+      const x2 = centerX + radius * Math.cos(endAngleRad);
+      const y2 = centerY + radius * Math.sin(endAngleRad);
+
+      const largeArcFlag = sliceAngle > 180 ? 1 : 0;
+      const path = `M ${centerX} ${centerY} L ${x1} ${y1} A ${radius} ${radius} 0 ${largeArcFlag} 1 ${x2} ${y2} Z`;
+
+      // Posição do label
+      const labelAngle = (startAngle + endAngle) / 2;
+      const labelAngleRad = (labelAngle * Math.PI) / 180;
+      const labelRadius = radius * 0.7;
+      const labelX = centerX + labelRadius * Math.cos(labelAngleRad);
+      const labelY = centerY + labelRadius * Math.sin(labelAngleRad);
+
+      // Atualizar ângulo para próximo slice
+      currentAngle = endAngle;
+
+      return {
+        path,
+        labelX,
+        labelY,
+        percentage: stat.percentage
+      };
+    });
+  }
+
+  // Função para calcular dados do gráfico de linha
+  function getLineChartData(timeline) {
+    if (!timeline || timeline.length === 0) {
+      return [];
+    }
+
+    const padding = 60;
+    const chartWidth = 800 - padding * 2;
+    const chartHeight = 400 - padding * 2;
+    const maxValue = Math.max(...timeline.map(d => d.count), 1);
+    const data = timeline;
+
+    const result = [];
+
+    // Grid
+    const gridLines = [];
+    for (let i = 0; i < 6; i++) {
+      const y = padding + (chartHeight / 5) * i;
+      gridLines.push({
+        x1: padding,
+        y: y,
+        x2: 800 - padding,
+        labelX: padding - 10,
+        label: Math.round(maxValue - (maxValue / 5) * i)
+      });
+    }
+    result.push({ type: 'grid', lines: gridLines });
+
+    // Linha do gráfico
+    const linePoints = data.map((d, i) => {
+      const x = padding + (chartWidth / (data.length - 1 || 1)) * i;
+      const y = padding + chartHeight - (d.count / maxValue) * chartHeight;
+      return `${x},${y}`;
+    }).join(' ');
+    result.push({ type: 'line', points: linePoints });
+
+    // Pontos
+    const points = data.map((point, i) => {
+      const x = padding + (chartWidth / (data.length - 1 || 1)) * i;
+      const y = padding + chartHeight - (point.count / maxValue) * chartHeight;
+      return { x, y, count: point.count };
+    });
+    result.push({ type: 'points', points: points });
+
+    // Labels do eixo X
+    const labels = data.map((point, i) => {
+      const x = padding + (chartWidth / (data.length - 1 || 1)) * i;
+      return { x, y: 400 - padding + 20, text: point.period };
+    });
+    result.push({ type: 'labels', labels: labels });
+
+    return result;
+  }
 </script>
 
 <!-- Conteúdo da Ferramenta Dashboard CENSUP -->
@@ -274,54 +374,25 @@
                   <h2>Distribuição por Tabulação</h2>
                   <div class="pie-chart-wrapper">
                     <svg class="pie-chart" viewBox="0 0 400 400">
-                      {@const total = statsData.total}
-                      {@const centerX = 200}
-                      {@const centerY = 200}
-                      {@const radius = 150}
-                      {@let currentAngle = -90}
-                      
-                      {#each statsData.stats as stat, index}
-                        {@const sliceAngle = (stat.value / total) * 360}
-                        {@const startAngle = currentAngle}
-                        {@const endAngle = currentAngle + sliceAngle}
-                        
-                        {@const startAngleRad = (startAngle * Math.PI) / 180}
-                        {@const endAngleRad = (endAngle * Math.PI) / 180}
-                        
-                        {@const x1 = centerX + radius * Math.cos(startAngleRad)}
-                        {@const y1 = centerY + radius * Math.sin(startAngleRad)}
-                        {@const x2 = centerX + radius * Math.cos(endAngleRad)}
-                        {@const y2 = centerY + radius * Math.sin(endAngleRad)}
-                        
-                        {@const largeArcFlag = sliceAngle > 180 ? 1 : 0}
-                        
+                      {#each getPieChartData(statsData.stats, statsData.total) as slice, index}
                         <path
-                          d="M {centerX} {centerY} L {x1} {y1} A {radius} {radius} 0 {largeArcFlag} 1 {x2} {y2} Z"
+                          d={slice.path}
                           fill={pieColors[index % pieColors.length]}
                           stroke="#fff"
                           stroke-width="2"
                           class="pie-slice"
                         />
-                        
-                        {@const labelAngle = (startAngle + endAngle) / 2}
-                        {@const labelAngleRad = (labelAngle * Math.PI) / 180}
-                        {@const labelRadius = radius * 0.7}
-                        {@const labelX = centerX + labelRadius * Math.cos(labelAngleRad)}
-                        {@const labelY = centerY + labelRadius * Math.sin(labelAngleRad)}
-                        
                         <text
-                          x={labelX}
-                          y={labelY}
+                          x={slice.labelX}
+                          y={slice.labelY}
                           text-anchor="middle"
                           dominant-baseline="middle"
                           fill="#fff"
                           font-size="14"
                           font-weight="bold"
                         >
-                          {stat.percentage}%
+                          {slice.percentage}%
                         </text>
-                        
-                        {@const currentAngle = endAngle}
                       {/each}
                     </svg>
                   </div>
@@ -380,77 +451,67 @@
                   <h2>Evolução por {selectedPeriod}</h2>
                   <div class="line-chart-wrapper">
                     <svg class="line-chart" viewBox="0 0 800 400">
-                      {@const padding = 60}
-                      {@const chartWidth = 800 - padding * 2}
-                      {@const chartHeight = 400 - padding * 2}
-                      {@const maxValue = Math.max(...timelineData.timeline.map(d => d.count), 1)}
-                      {@const data = timelineData.timeline}
-                      
-                      <!-- Grid -->
-                      <g class="grid">
-                        {#each Array(6) as _, i}
-                          {@const y = padding + (chartHeight / 5) * i}
-                          <line x1={padding} y1={y} x2={800 - padding} y2={y} stroke="#e5e7eb" stroke-width="1" />
-                          <text x={padding - 10} y={y} text-anchor="end" dominant-baseline="middle" fill="#6b7280" font-size="12">
-                            {Math.round(maxValue - (maxValue / 5) * i)}
-                          </text>
-                        {/each}
-                      </g>
-                      
-                      <!-- Linha do gráfico -->
-                      <polyline
-                        points={data.map((d, i) => {
-                          const x = padding + (chartWidth / (data.length - 1 || 1)) * i;
-                          const y = padding + chartHeight - (d.count / maxValue) * chartHeight;
-                          return `${x},${y}`;
-                        }).join(' ')}
-                        fill="none"
-                        stroke="#6366F1"
-                        stroke-width="3"
-                        class="line-path"
-                      />
-                      
-                      <!-- Pontos -->
-                      {#each data as point, i}
-                        {@const x = padding + (chartWidth / (data.length - 1 || 1)) * i}
-                        {@const y = padding + chartHeight - (point.count / maxValue) * chartHeight}
-                        <circle
-                          cx={x}
-                          cy={y}
-                          r="5"
-                          fill="#6366F1"
-                          stroke="#fff"
-                          stroke-width="2"
-                          class="data-point"
-                        />
-                        <text
-                          x={x}
-                          y={y - 15}
-                          text-anchor="middle"
-                          fill="#374151"
-                          font-size="12"
-                          font-weight="bold"
-                        >
-                          {point.count}
-                        </text>
+                      {#each getLineChartData(timelineData.timeline) as item}
+                        {#if item.type === 'grid'}
+                          <!-- Grid -->
+                          <g class="grid">
+                            {#each item.lines as line}
+                              <line x1={line.x1} y1={line.y} x2={line.x2} y2={line.y} stroke="#e5e7eb" stroke-width="1" />
+                              <text x={line.labelX} y={line.y} text-anchor="end" dominant-baseline="middle" fill="#6b7280" font-size="12">
+                                {line.label}
+                              </text>
+                            {/each}
+                          </g>
+                        {:else if item.type === 'line'}
+                          <!-- Linha do gráfico -->
+                          <polyline
+                            points={item.points}
+                            fill="none"
+                            stroke="#6366F1"
+                            stroke-width="3"
+                            class="line-path"
+                          />
+                        {:else if item.type === 'points'}
+                          <!-- Pontos -->
+                          {#each item.points as point}
+                            <circle
+                              cx={point.x}
+                              cy={point.y}
+                              r="5"
+                              fill="#6366F1"
+                              stroke="#fff"
+                              stroke-width="2"
+                              class="data-point"
+                            />
+                            <text
+                              x={point.x}
+                              y={point.y - 15}
+                              text-anchor="middle"
+                              fill="#374151"
+                              font-size="12"
+                              font-weight="bold"
+                            >
+                              {point.count}
+                            </text>
+                          {/each}
+                        {:else if item.type === 'labels'}
+                          <!-- Eixo X (períodos) -->
+                          <g class="x-axis">
+                            {#each item.labels as label}
+                              <text
+                                x={label.x}
+                                y={label.y}
+                                text-anchor="middle"
+                                fill="#6b7280"
+                                font-size="11"
+                                transform="rotate(-45 {label.x} {label.y})"
+                              >
+                                {label.text}
+                              </text>
+                            {/each}
+                          </g>
+                        {/if}
                       {/each}
-                      
-                      <!-- Eixo X (períodos) -->
-                      <g class="x-axis">
-                        {#each data as point, i}
-                          {@const x = padding + (chartWidth / (data.length - 1 || 1)) * i}
-                          <text
-                            x={x}
-                            y={400 - padding + 20}
-                            text-anchor="middle"
-                            fill="#6b7280"
-                            font-size="11"
-                            transform="rotate(-45 {x} {400 - padding + 20})"
-                          >
-                            {point.period}
-                          </text>
-                        {/each}
-                      </g>
                     </svg>
                   </div>
                 </div>
