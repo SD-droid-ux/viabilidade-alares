@@ -8065,6 +8065,302 @@ app.get('/api/vi-ala/list', async (req, res) => {
   }
 });
 
+// Função auxiliar para parsear data do formato "DD/MM/YYYY HH:MM" ou "DD/MM/YYYY"
+function parseDateFromString(dateStr) {
+  if (!dateStr || typeof dateStr !== 'string') {
+    return null;
+  }
+  
+  try {
+    // Formato: "DD/MM/YYYY HH:MM" ou "DD/MM/YYYY"
+    const parts = dateStr.trim().split(' ');
+    const datePart = parts[0]; // "DD/MM/YYYY"
+    const timePart = parts[1] || '00:00'; // "HH:MM" ou "00:00"
+    
+    const [day, month, year] = datePart.split('/');
+    const [hour, minute] = timePart.split(':');
+    
+    if (!day || !month || !year) {
+      return null;
+    }
+    
+    // Criar objeto Date (mês é 0-indexed no JavaScript)
+    const date = new Date(
+      parseInt(year, 10),
+      parseInt(month, 10) - 1,
+      parseInt(day, 10),
+      parseInt(hour || '0', 10),
+      parseInt(minute || '0', 10)
+    );
+    
+    // Verificar se a data é válida
+    if (isNaN(date.getTime())) {
+      return null;
+    }
+    
+    return date;
+  } catch (err) {
+    console.warn('⚠️ [parseDateFromString] Erro ao parsear data:', dateStr, err);
+    return null;
+  }
+}
+
+// Função auxiliar para agrupar por período
+function getPeriodKey(date, period) {
+  if (!date) return null;
+  
+  const year = date.getFullYear();
+  const month = date.getMonth() + 1; // 1-12
+  const day = date.getDate();
+  const week = getWeekNumber(date);
+  const quarter = Math.floor((month - 1) / 3) + 1;
+  const semester = month <= 6 ? 1 : 2;
+  
+  switch (period.toUpperCase()) {
+    case 'DIA':
+      return `${String(day).padStart(2, '0')}/${String(month).padStart(2, '0')}/${year}`;
+    case 'SEMANA':
+      return `Sem ${week}/${year}`;
+    case 'MÊS':
+    case 'MES':
+      return `${String(month).padStart(2, '0')}/${year}`;
+    case 'TRIMESTRE':
+      return `T${quarter}/${year}`;
+    case 'SEMESTRE':
+      return `S${semester}/${year}`;
+    case 'ANUAL':
+    case 'ANO':
+      return String(year);
+    default:
+      return null;
+  }
+}
+
+// Função auxiliar para calcular número da semana
+function getWeekNumber(date) {
+  const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+  const dayNum = d.getUTCDay() || 7;
+  d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+  return Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
+}
+
+// Rota para obter estatísticas por tabulação (gráfico de pizza)
+app.get('/api/vi-ala/stats', async (req, res) => {
+  try {
+    // Garantir headers CORS
+    const origin = req.headers.origin;
+    if (origin) {
+      res.setHeader('Access-Control-Allow-Origin', origin);
+    } else {
+      res.setHeader('Access-Control-Allow-Origin', '*');
+    }
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+    res.setHeader('Content-Type', 'application/json');
+    
+    console.log('📥 [API] Requisição recebida para estatísticas de VI ALAs');
+    
+    // Garantir que a base existe
+    await _ensureVIALABaseInternal();
+    
+    // Ler dados da base
+    const data = await _readVIALABaseInternal();
+    console.log(`📊 [API] Total de registros na base: ${data.length}`);
+    
+    // Agrupar por tabulação
+    const statsByTabulacao = {};
+    let total = 0;
+    
+    for (const row of data) {
+      const tabulacao = row['TABULAÇÃO FINAL'] || 'Não Informado';
+      if (!statsByTabulacao[tabulacao]) {
+        statsByTabulacao[tabulacao] = 0;
+      }
+      statsByTabulacao[tabulacao]++;
+      total++;
+    }
+    
+    // Converter para formato de array para gráfico de pizza
+    const stats = Object.entries(statsByTabulacao).map(([tabulacao, count]) => ({
+      label: tabulacao,
+      value: count,
+      percentage: total > 0 ? ((count / total) * 100).toFixed(2) : '0.00'
+    }));
+    
+    // Ordenar por quantidade (maior primeiro)
+    stats.sort((a, b) => b.value - a.value);
+    
+    console.log(`✅ [API] Retornando estatísticas de ${stats.length} tabulações (total: ${total} registros)`);
+    
+    res.json({
+      success: true,
+      stats: stats,
+      total: total
+    });
+  } catch (err) {
+    console.error('❌ [API] Erro ao obter estatísticas:', err);
+    console.error('❌ [API] Stack:', err.stack);
+    
+    // Garantir headers CORS mesmo em erro
+    const origin = req.headers.origin;
+    if (origin) {
+      res.setHeader('Access-Control-Allow-Origin', origin);
+    } else {
+      res.setHeader('Access-Control-Allow-Origin', '*');
+    }
+    
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Rota para obter timeline de VI ALAs (gráfico de linha)
+app.get('/api/vi-ala/timeline', async (req, res) => {
+  try {
+    // Garantir headers CORS
+    const origin = req.headers.origin;
+    if (origin) {
+      res.setHeader('Access-Control-Allow-Origin', origin);
+    } else {
+      res.setHeader('Access-Control-Allow-Origin', '*');
+    }
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+    res.setHeader('Content-Type', 'application/json');
+    
+    const { period = 'DIA' } = req.query; // DIA, SEMANA, MÊS, TRIMESTRE, SEMESTRE, ANUAL
+    
+    console.log(`📥 [API] Requisição recebida para timeline de VI ALAs (período: ${period})`);
+    
+    // Validar período
+    const validPeriods = ['DIA', 'SEMANA', 'MÊS', 'MES', 'TRIMESTRE', 'SEMESTRE', 'ANUAL', 'ANO'];
+    if (!validPeriods.includes(period.toUpperCase())) {
+      return res.status(400).json({
+        success: false,
+        error: `Período inválido. Use: ${validPeriods.join(', ')}`
+      });
+    }
+    
+    // Garantir que a base existe
+    await _ensureVIALABaseInternal();
+    
+    // Ler dados da base
+    const data = await _readVIALABaseInternal();
+    console.log(`📊 [API] Total de registros na base: ${data.length}`);
+    
+    // Agrupar por período
+    const timelineByPeriod = {};
+    
+    for (const row of data) {
+      const dateStr = row['DATA'] || '';
+      if (!dateStr) continue;
+      
+      const date = parseDateFromString(dateStr);
+      if (!date) continue;
+      
+      const periodKey = getPeriodKey(date, period);
+      if (!periodKey) continue;
+      
+      if (!timelineByPeriod[periodKey]) {
+        timelineByPeriod[periodKey] = 0;
+      }
+      timelineByPeriod[periodKey]++;
+    }
+    
+    // Converter para array e ordenar por período
+    const timeline = Object.entries(timelineByPeriod).map(([periodKey, count]) => ({
+      period: periodKey,
+      count: count
+    }));
+    
+    // Ordenar por período (cronologicamente)
+    timeline.sort((a, b) => {
+      // Converter período para data para ordenação
+      const dateA = parsePeriodToDate(a.period, period);
+      const dateB = parsePeriodToDate(b.period, period);
+      if (!dateA || !dateB) return 0;
+      return dateA.getTime() - dateB.getTime();
+    });
+    
+    console.log(`✅ [API] Retornando timeline com ${timeline.length} períodos`);
+    
+    res.json({
+      success: true,
+      period: period.toUpperCase(),
+      timeline: timeline,
+      total: timeline.reduce((sum, item) => sum + item.count, 0)
+    });
+  } catch (err) {
+    console.error('❌ [API] Erro ao obter timeline:', err);
+    console.error('❌ [API] Stack:', err.stack);
+    
+    // Garantir headers CORS mesmo em erro
+    const origin = req.headers.origin;
+    if (origin) {
+      res.setHeader('Access-Control-Allow-Origin', origin);
+    } else {
+      res.setHeader('Access-Control-Allow-Origin', '*');
+    }
+    
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Função auxiliar para converter período de volta para data (para ordenação)
+function parsePeriodToDate(periodKey, periodType) {
+  try {
+    switch (periodType.toUpperCase()) {
+      case 'DIA':
+        // Formato: "DD/MM/YYYY"
+        const [day, month, year] = periodKey.split('/');
+        return new Date(parseInt(year, 10), parseInt(month, 10) - 1, parseInt(day, 10));
+      case 'SEMANA':
+        // Formato: "Sem W/YYYY"
+        const weekMatch = periodKey.match(/Sem (\d+)\/(\d+)/);
+        if (weekMatch) {
+          const week = parseInt(weekMatch[1], 10);
+          const year = parseInt(weekMatch[2], 10);
+          // Aproximação: primeira semana começa em 1 de janeiro
+          const date = new Date(year, 0, 1);
+          date.setDate(date.getDate() + (week - 1) * 7);
+          return date;
+        }
+        return null;
+      case 'MÊS':
+      case 'MES':
+        // Formato: "MM/YYYY"
+        const [monthMes, yearMes] = periodKey.split('/');
+        return new Date(parseInt(yearMes, 10), parseInt(monthMes, 10) - 1, 1);
+      case 'TRIMESTRE':
+        // Formato: "TQ/YYYY"
+        const trimMatch = periodKey.match(/T(\d+)\/(\d+)/);
+        if (trimMatch) {
+          const quarter = parseInt(trimMatch[1], 10);
+          const yearTrim = parseInt(trimMatch[2], 10);
+          const monthTrim = (quarter - 1) * 3;
+          return new Date(yearTrim, monthTrim, 1);
+        }
+        return null;
+      case 'SEMESTRE':
+        // Formato: "SS/YYYY"
+        const semMatch = periodKey.match(/S(\d+)\/(\d+)/);
+        if (semMatch) {
+          const semester = parseInt(semMatch[1], 10);
+          const yearSem = parseInt(semMatch[2], 10);
+          const monthSem = (semester - 1) * 6;
+          return new Date(yearSem, monthSem, 1);
+        }
+        return null;
+      case 'ANUAL':
+      case 'ANO':
+        // Formato: "YYYY"
+        return new Date(parseInt(periodKey, 10), 0, 1);
+      default:
+        return null;
+    }
+  } catch (err) {
+    return null;
+  }
+}
+
 // Rota para baixar o arquivo base_VI ALA.xlsx completo
 app.get('/api/vi-ala.xlsx', async (req, res) => {
   try {
