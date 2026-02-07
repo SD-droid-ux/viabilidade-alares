@@ -276,10 +276,6 @@
     <div class="dashboard-layout">
       <!-- Sidebar -->
       <aside class="sidebar">
-        <div class="sidebar-header">
-          <h2>📊 Dashboard CENSUP</h2>
-        </div>
-        
         <nav class="sidebar-nav">
           <button 
             class="nav-item"
@@ -588,21 +584,8 @@
     box-shadow: 2px 0 8px rgba(0, 0, 0, 0.05);
   }
 
-  .sidebar-header {
-    padding: 1.5rem;
-    border-bottom: 1px solid rgba(123, 104, 238, 0.2);
-    background: linear-gradient(135deg, #7B68EE 0%, #6495ED 100%);
-  }
-
-  .sidebar-header h2 {
-    margin: 0;
-    font-size: 1.25rem;
-    color: #fff;
-    font-weight: 600;
-  }
-
   .sidebar-nav {
-    padding: 1rem;
+    padding: 1.5rem 1rem 1rem 1rem;
     flex: 1;
   }
 
