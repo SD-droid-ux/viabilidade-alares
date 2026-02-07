@@ -29,6 +29,10 @@
     period: 'DIA'
   };
   
+  // Dados processados para os gráficos (reativos)
+  $: pieChartData = getPieChartData(statsData.stats, statsData.total);
+  $: lineChartData = getLineChartData(timelineData.timeline);
+  
   // Estados de loading específicos
   let loadingStats = false;
   let loadingTimeline = false;
@@ -62,6 +66,7 @@
       const data = await response.json();
       if (data.success) {
         statsData = data;
+        console.log('📊 [Dashboard] Estatísticas carregadas:', statsData);
       } else {
         throw new Error(data.error || 'Erro ao carregar estatísticas');
       }
@@ -164,7 +169,7 @@
 
   // Função para calcular dados do gráfico de pizza
   function getPieChartData(stats, total) {
-    if (!stats || stats.length === 0 || total === 0) {
+    if (!stats || !Array.isArray(stats) || stats.length === 0 || !total || total === 0) {
       return [];
     }
 
@@ -376,27 +381,35 @@
                 <div class="chart-container">
                   <h2>Distribuição por Tabulação</h2>
                   <div class="pie-chart-wrapper">
-                    <svg class="pie-chart" viewBox="0 0 400 400">
-                      {#each getPieChartData(statsData.stats, statsData.total) as slice, index}
-                        <path
-                          d={slice.path}
-                          fill={pieColors[index % pieColors.length]}
-                          stroke="#fff"
-                          stroke-width="2"
-                          class="pie-slice"
-                        />
-                        <text
-                          x={slice.labelX}
-                          y={slice.labelY}
-                          text-anchor="middle"
-                          dominant-baseline="middle"
-                          fill="#fff"
-                          font-size="14"
-                          font-weight="bold"
-                        >
-                          {slice.percentage}%
+                    <svg class="pie-chart" viewBox="0 0 400 400" xmlns="http://www.w3.org/2000/svg">
+                      {#if pieChartData && pieChartData.length > 0}
+                        {#each pieChartData as slice, index}
+                          <path
+                            d={slice.path}
+                            fill={pieColors[index % pieColors.length]}
+                            stroke="#fff"
+                            stroke-width="2"
+                            class="pie-slice"
+                          />
+                          <text
+                            x={slice.labelX}
+                            y={slice.labelY}
+                            text-anchor="middle"
+                            dominant-baseline="middle"
+                            fill="#fff"
+                            font-size="14"
+                            font-weight="bold"
+                          >
+                            {slice.percentage}%
+                          </text>
+                        {/each}
+                      {:else}
+                        <!-- Círculo vazio quando não há dados -->
+                        <circle cx="200" cy="200" r="150" fill="rgba(123, 104, 238, 0.1)" stroke="rgba(123, 104, 238, 0.3)" stroke-width="2" />
+                        <text x="200" y="200" text-anchor="middle" dominant-baseline="middle" fill="#7B68EE" font-size="16" font-weight="500">
+                          Sem dados
                         </text>
-                      {/each}
+                      {/if}
                     </svg>
                   </div>
                   
@@ -457,7 +470,7 @@
                   <h2>Evolução por {selectedPeriod}</h2>
                   <div class="line-chart-wrapper">
                     <svg class="line-chart" viewBox="0 0 800 400">
-                      {#each getLineChartData(timelineData.timeline) as item}
+                      {#each lineChartData as item}
                         {#if item.type === 'grid'}
                           <!-- Grid -->
                           <g class="grid">
