@@ -1,6 +1,5 @@
 <script>
   import { onMount, onDestroy } from 'svelte';
-  import Loading from '../Loading.svelte';
   import { getApiUrl } from '../config.js';
 
   // Props do componente
@@ -267,7 +266,12 @@
 <!-- Conteúdo da Ferramenta Dashboard CENSUP -->
 <div class="dashboard-censup-content">
   {#if isLoading}
-    <Loading message={loadingMessage} />
+    <div class="full-loading-container">
+      <div class="custom-spinner-wrapper">
+        <div class="custom-spinner"></div>
+        <p class="loading-text">{loadingMessage || 'Carregando...'}</p>
+      </div>
+    </div>
   {:else}
     <div class="dashboard-layout">
       <!-- Sidebar -->
@@ -360,7 +364,10 @@
 
             {#if loadingStats}
               <div class="loading-container">
-                <Loading message="Carregando estatísticas..." />
+                <div class="custom-spinner-wrapper">
+                  <div class="custom-spinner"></div>
+                  <p class="loading-text">Carregando estatísticas...</p>
+                </div>
               </div>
             {:else if statsData.stats.length === 0}
               <div class="empty-state">
@@ -437,7 +444,10 @@
 
             {#if loadingTimeline}
               <div class="loading-container">
-                <Loading message="Carregando timeline..." />
+                <div class="custom-spinner-wrapper">
+                  <div class="custom-spinner"></div>
+                  <p class="loading-text">Carregando timeline...</p>
+                </div>
               </div>
             {:else if timelineData.timeline.length === 0}
               <div class="empty-state">
@@ -767,6 +777,46 @@
     justify-content: center;
     align-items: center;
     min-height: 400px;
+    padding: 3rem;
+  }
+
+  .custom-spinner-wrapper {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 1.5rem;
+  }
+
+  .custom-spinner {
+    width: 60px;
+    height: 60px;
+    border: 4px solid rgba(123, 104, 238, 0.2);
+    border-top-color: #7B68EE;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+  }
+
+  @keyframes spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+
+  .loading-text {
+    color: #5b21b6;
+    font-size: 1rem;
+    font-weight: 500;
+    margin: 0;
+    opacity: 0.8;
+  }
+
+  .full-loading-container {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    background: #f5f7fa;
   }
 
   .empty-state {
