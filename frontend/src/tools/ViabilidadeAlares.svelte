@@ -3630,37 +3630,75 @@
               ? '#FF9800' // Laranja para CTO fora do limite
               : getCTOColor(cto.pct_ocup || 0);
             
-            // Configuração da rota
-            const routeConfig = {
-              path: offsetPath,
-              geodesic: false, // CRÍTICO: false = seguir exatamente os pontos (não fazer linha reta entre eles)
-              strokeColor: routeColor,
-              strokeOpacity: cto.is_out_of_limit ? 0.6 : 0.7, // Opacidade menor para fora do limite
-              strokeWeight: 5, // Espessura aumentada para melhor visibilidade
-              map: map,
-              zIndex: 500 + index,
-              editable: editingRoutes // Tornar editável se estiver no modo de edição
-            };
+            let routePolyline;
             
-            // Se estiver fora do limite, adicionar estilo pontilhado
+            // Se estiver fora do limite, criar duas polylines: uma cinza claro contínua e outra laranja tracejada
             if (cto.is_out_of_limit) {
-              // Criar padrão pontilhado usando icons (mais evidente)
+              // Polyline cinza claro contínua (base)
+              const baseRouteConfig = {
+                path: offsetPath,
+                geodesic: false,
+                strokeColor: '#CCCCCC', // Cinza claro
+                strokeOpacity: 0.5,
+                strokeWeight: 5,
+                map: map,
+                zIndex: 500 + index - 1, // zIndex menor (fica por baixo)
+                editable: false // Base não é editável
+              };
+              const basePolyline = new google.maps.Polyline(baseRouteConfig);
+              routes.push(basePolyline);
+              
+              // Polyline laranja tracejada (sobreposta)
+              const routeConfig = {
+                path: offsetPath,
+                geodesic: false, // CRÍTICO: false = seguir exatamente os pontos (não fazer linha reta entre eles)
+                strokeColor: routeColor, // Laranja
+                strokeOpacity: 0.8, // Opacidade maior para os traços ficarem mais visíveis
+                strokeWeight: 5,
+                map: map,
+                zIndex: 500 + index, // zIndex maior (fica por cima)
+                editable: editingRoutes // Tornar editável se estiver no modo de edição
+              };
+              
+              // Adicionar traços verticais tracejados
               routeConfig.icons = [{
                 icon: {
-                  path: 'M -2,0 L 2,0', // Traço horizontal mais longo
+                  path: 'M 0,-3 0,3', // Traço vertical
                   strokeOpacity: 1,
-                  strokeWeight: 5, // Espessura aumentada
+                  strokeWeight: 5,
                   scale: 1
                 },
                 offset: '0%',
-                repeat: '40px' // Espaçamento maior entre traços
+                repeat: '40px' // Espaçamento entre traços
               }];
+              
+              routePolyline = new google.maps.Polyline(routeConfig);
+              
+              // Anexar referência à polyline base na tracejada para remoção conjunta
+              try {
+                routePolyline.__basePolyline = basePolyline;
+              } catch (e) {
+                console.error(`❌ Erro ao anexar basePolyline:`, e);
+              }
+            } else {
+              // Configuração da rota normal (dentro do limite)
+              const routeConfig = {
+                path: offsetPath,
+                geodesic: false, // CRÍTICO: false = seguir exatamente os pontos (não fazer linha reta entre eles)
+                strokeColor: routeColor,
+                strokeOpacity: 0.7,
+                strokeWeight: 5, // Espessura aumentada para melhor visibilidade
+                map: map,
+                zIndex: 500 + index,
+                editable: editingRoutes // Tornar editável se estiver no modo de edição
+              };
+              
+              routePolyline = new google.maps.Polyline(routeConfig);
             }
             
             // Desenhar Polyline usando TODOS os pontos detalhados SEM offset
             // IMPORTANTE: geodesic: false garante que a rota siga EXATAMENTE os pontos fornecidos
             // Isso faz com que a rota siga cada curva e mudança de direção das ruas
-            const routePolyline = new google.maps.Polyline(routeConfig);
 
             // Adicionar rota ao array ANTES de criar listeners para garantir índice correto
             routes.push(routePolyline);
@@ -3754,32 +3792,69 @@
             // Aplicar offset lateral para evitar sobreposição
             const offsetFallbackPath = applyRouteOffset(fallbackPath, index);
             
-            // Configuração da rota fallback
-            const fallbackRouteConfig = {
-              path: offsetFallbackPath,
-              geodesic: true,
-              strokeColor: routeColor,
-              strokeOpacity: cto.is_out_of_limit ? 0.5 : 0.6,
-              strokeWeight: 4,
-              map: map,
-              zIndex: 500 + index
-            };
+            let routePolyline;
             
-            // Se estiver fora do limite, adicionar estilo pontilhado
+            // Se estiver fora do limite, criar duas polylines: uma cinza claro contínua e outra laranja tracejada
             if (cto.is_out_of_limit) {
+              // Polyline cinza claro contínua (base)
+              const baseFallbackConfig = {
+                path: offsetFallbackPath,
+                geodesic: true,
+                strokeColor: '#CCCCCC', // Cinza claro
+                strokeOpacity: 0.5,
+                strokeWeight: 4,
+                map: map,
+                zIndex: 500 + index - 1, // zIndex menor (fica por baixo)
+                editable: false // Base não é editável
+              };
+              const basePolyline = new google.maps.Polyline(baseFallbackConfig);
+              routes.push(basePolyline);
+              
+              // Polyline laranja tracejada (sobreposta)
+              const fallbackRouteConfig = {
+                path: offsetFallbackPath,
+                geodesic: true,
+                strokeColor: routeColor, // Laranja
+                strokeOpacity: 0.8, // Opacidade maior para os traços ficarem mais visíveis
+                strokeWeight: 4,
+                map: map,
+                zIndex: 500 + index // zIndex maior (fica por cima)
+              };
+              
+              // Adicionar traços verticais tracejados
               fallbackRouteConfig.icons = [{
                 icon: {
-                  path: 'M -2,0 L 2,0', // Traço horizontal mais longo
+                  path: 'M 0,-3 0,3', // Traço vertical
                   strokeOpacity: 1,
-                  strokeWeight: 5, // Espessura aumentada
+                  strokeWeight: 4,
                   scale: 1
                 },
                 offset: '0%',
-                repeat: '40px' // Espaçamento maior entre traços
+                repeat: '40px' // Espaçamento entre traços
               }];
+              
+              routePolyline = new google.maps.Polyline(fallbackRouteConfig);
+              
+              // Anexar referência à polyline base na tracejada para remoção conjunta
+              try {
+                routePolyline.__basePolyline = basePolyline;
+              } catch (e) {
+                console.error(`❌ Erro ao anexar basePolyline (fallback):`, e);
+              }
+            } else {
+              // Configuração da rota fallback normal (dentro do limite)
+              const fallbackRouteConfig = {
+                path: offsetFallbackPath,
+                geodesic: true,
+                strokeColor: routeColor,
+                strokeOpacity: 0.6,
+                strokeWeight: 4,
+                map: map,
+                zIndex: 500 + index
+              };
+              
+              routePolyline = new google.maps.Polyline(fallbackRouteConfig);
             }
-            
-            const routePolyline = new google.maps.Polyline(fallbackRouteConfig);
             routes.push(routePolyline);
             const actualRouteIndex = routes.length - 1;
 
@@ -4607,6 +4682,28 @@
     }).filter(item => item.routeIndex !== -1).sort((a, b) => b.routeIndex - a.routeIndex);
     
     routesToRemoveWithIndex.forEach(({ route, routeIndex }) => {
+      // Se a rota tem uma polyline base associada (para rotas fora do limite), remover também
+      if (route.__basePolyline) {
+        try {
+          const basePolyline = route.__basePolyline;
+          basePolyline.setMap(null);
+          // Remover a polyline base do array routes também
+          const baseIndex = routes.findIndex(r => r === basePolyline);
+          if (baseIndex !== -1) {
+            routes.splice(baseIndex, 1);
+            // Ajustar índices se necessário
+            if (editingRouteIndex !== null && editingRouteIndex > baseIndex) {
+              editingRouteIndex--;
+            }
+            if (selectedRouteIndex !== null && selectedRouteIndex > baseIndex) {
+              selectedRouteIndex--;
+            }
+          }
+        } catch (e) {
+          console.warn(`⚠️ Erro ao remover polyline base:`, e);
+        }
+      }
+      
       route.setMap(null);
       // Se a rota que está sendo removida estava sendo editada, finalizar edição
       if (editingRouteIndex === routeIndex) {
