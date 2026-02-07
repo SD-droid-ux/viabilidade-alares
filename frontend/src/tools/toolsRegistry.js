@@ -11,6 +11,7 @@ import ViabilidadeAlares from './ViabilidadeAlares.svelte';
 import AnaliseCobertura from './AnaliseCobertura.svelte';
 import CalculadoraOrcamento from './CalculadoraOrcamento.svelte';
 import MapaConsulta from './MapaConsulta.svelte';
+import DashboardCENSUP from './DashboardCENSUP.svelte';
 
 /**
  * Registry de todas as ferramentas disponíveis no portal
@@ -60,6 +61,15 @@ export const toolsRegistry = [
     icon: '🗺️',
     color: '#F59E0B',
     component: MapaConsulta,
+    available: true
+  },
+  {
+    id: 'dashboard-censup',
+    title: 'Dashboard CENSUP',
+    description: 'Dashboard para visualização e análise de dados CENSUP',
+    icon: '📊',
+    color: '#6366F1',
+    component: DashboardCENSUP,
     available: true
   }
 ];
