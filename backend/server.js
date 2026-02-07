@@ -4082,7 +4082,8 @@ async function _ensureVIALABaseInternal() {
         'CIDADE',
         'ENDEREÇO',
         'LATITUDE',
-        'LONGITUDE'
+        'LONGITUDE',
+        'TABULAÇÃO FINAL'
       ];
       
       const worksheet = XLSX.utils.aoa_to_sheet([headers]);
@@ -4118,7 +4119,7 @@ async function readVIALABaseFromSupabase() {
     
     const { data, error } = await supabase
       .from('vi_ala')
-      .select('vi_ala, ala, data, projetista, cidade, endereco, latitude, longitude, created_at')
+      .select('vi_ala, ala, data, projetista, cidade, endereco, latitude, longitude, tabulacao_final, created_at')
       .order('created_at', { ascending: false });
     
     if (error) {
@@ -4175,7 +4176,8 @@ async function readVIALABaseFromSupabase() {
         'CIDADE': row.cidade || '',
         'ENDEREÇO': row.endereco || '',
         'LATITUDE': row.latitude || '',
-        'LONGITUDE': row.longitude || ''
+        'LONGITUDE': row.longitude || '',
+        'TABULAÇÃO FINAL': row.tabulacao_final || ''
       };
     });
     
@@ -4442,7 +4444,8 @@ async function saveVIALARecordToSupabase(record) {
       cidade: record['CIDADE'] || null,
       endereco: record['ENDEREÇO'] || null,
       latitude: record['LATITUDE'] ? parseFloat(record['LATITUDE']) : null,
-      longitude: record['LONGITUDE'] ? parseFloat(record['LONGITUDE']) : null
+      longitude: record['LONGITUDE'] ? parseFloat(record['LONGITUDE']) : null,
+      tabulacao_final: record['TABULAÇÃO FINAL'] || null
     };
     
     // Validar campos obrigatórios
@@ -7963,7 +7966,7 @@ app.post('/api/vi-ala/save', async (req, res) => {
     console.log('📥 [API] Requisição recebida para salvar VI ALA');
     console.log('📦 [API] Body recebido do frontend:', req.body);
     
-    const { viAla, ala, data, projetista, cidade, endereco, latitude, longitude } = req.body;
+    const { viAla, ala, data, projetista, cidade, endereco, latitude, longitude, tabulacaoFinal } = req.body;
     
     if (!viAla || viAla.trim() === '') {
       console.warn('⚠️ [API] VI ALA não fornecido ou vazio');
@@ -7979,7 +7982,8 @@ app.post('/api/vi-ala/save', async (req, res) => {
       'CIDADE': cidade || '',
       'ENDEREÇO': endereco || '',
       'LATITUDE': latitude || '',
-      'LONGITUDE': longitude || ''
+      'LONGITUDE': longitude || '',
+      'TABULAÇÃO FINAL': tabulacaoFinal || ''
     };
     
     console.log('💾 [API] Salvando registro:', record);
@@ -8040,7 +8044,8 @@ app.get('/api/vi-ala/list', async (req, res) => {
         endereco: row['ENDEREÇO'] || '',
         data_geracao: row['DATA'] || '',
         latitude: row['LATITUDE'] || '',
-        longitude: row['LONGITUDE'] || ''
+        longitude: row['LONGITUDE'] || '',
+        tabulacao_final: row['TABULAÇÃO FINAL'] || ''
       };
     });
     
