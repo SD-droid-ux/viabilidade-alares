@@ -4536,6 +4536,45 @@
         routeData = [...routeData];
       }
       
+      // Se a CTO editada está fora do limite, atualizar nearestCTOOutsideLimit também
+      if (updatedCTO.is_out_of_limit) {
+        // Verificar se é a mesma CTO que está em nearestCTOOutsideLimit
+        // Usar ID da CTO para comparação (mais confiável que coordenadas que podem mudar)
+        if (nearestCTOOutsideLimit) {
+          const nearestId = nearestCTOOutsideLimit.id_cto || nearestCTOOutsideLimit.id;
+          const updatedId = updatedCTO.id_cto || updatedCTO.id;
+          const nearestNome = nearestCTOOutsideLimit.nome;
+          const updatedNome = updatedCTO.nome;
+          
+          console.log(`🔍 Comparando CTOs: nearestId=${nearestId}, updatedId=${updatedId}, nearestNome=${nearestNome}, updatedNome=${updatedNome}`);
+          
+          // Comparar por ID ou nome (caso ID não esteja disponível)
+          if ((nearestId && updatedId && nearestId === updatedId) || 
+              (nearestNome && updatedNome && nearestNome === updatedNome)) {
+            // Atualizar nearestCTOOutsideLimit com os novos valores
+            nearestCTOOutsideLimit = {
+              ...nearestCTOOutsideLimit,
+              distancia_metros: distanciaMetros,
+              distancia_km: distanciaKm,
+              distancia_real: newDistance
+            };
+            // Forçar reatividade do Svelte criando um novo objeto
+            nearestCTOOutsideLimit = {...nearestCTOOutsideLimit};
+            console.log(`🔄 nearestCTOOutsideLimit atualizado com nova distância: ${distanciaMetros}m (${distanciaKm}km)`);
+            console.log(`📋 nearestCTOOutsideLimit após atualização:`, {
+              nome: nearestCTOOutsideLimit.nome,
+              distancia_metros: nearestCTOOutsideLimit.distancia_metros,
+              distancia_km: nearestCTOOutsideLimit.distancia_km,
+              distancia_real: nearestCTOOutsideLimit.distancia_real
+            });
+          } else {
+            console.log(`⚠️ CTO editada não corresponde à nearestCTOOutsideLimit. IDs: ${nearestId} vs ${updatedId}, Nomes: ${nearestNome} vs ${updatedNome}`);
+          }
+        } else {
+          console.log(`⚠️ CTO editada está fora do limite mas nearestCTOOutsideLimit é null`);
+        }
+      }
+      
       console.log(`✅ Rota da CTO ${ctoIndex} (${updatedCTO.nome}) editada. Nova distância: ${distanciaMetros}m (${distanciaKm}km)`);
       console.log(`📋 CTO após atualização:`, {
         nome: ctos[ctoIndex].nome,
