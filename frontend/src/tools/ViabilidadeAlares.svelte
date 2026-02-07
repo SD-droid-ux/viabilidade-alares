@@ -6193,7 +6193,8 @@
           cidade: reportForm.cidade || '',
           endereco: reportForm.enderecoCompleto || '',
           latitude: clientCoords ? clientCoords.lat.toFixed(6) : '',
-          longitude: clientCoords ? clientCoords.lng.toFixed(6) : ''
+          longitude: clientCoords ? clientCoords.lng.toFixed(6) : '',
+          tabulacaoFinal: reportForm.tabulacaoFinal || ''
         };
         
         console.log('💾 [Frontend] Salvando registro VI ALA na base...', viAlaRecord);
