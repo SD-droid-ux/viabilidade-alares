@@ -362,12 +362,6 @@
             </div>
           </div>
         {/if}
-        
-        <div class="sidebar-footer">
-          <button class="refresh-btn" on:click={refreshActiveReport}>
-            🔄 Atualizar
-          </button>
-        </div>
       </aside>
 
       <!-- Área de Conteúdo -->
@@ -725,29 +719,6 @@
     box-shadow: 0 2px 4px rgba(123, 104, 238, 0.2);
   }
 
-  .sidebar-footer {
-    padding: 1rem;
-    border-top: 1px solid rgba(123, 104, 238, 0.2);
-  }
-
-  .refresh-btn {
-    width: 100%;
-    padding: 0.75rem;
-    background: linear-gradient(135deg, #7B68EE 0%, #6495ED 100%);
-    color: #fff;
-    border: none;
-    border-radius: 8px;
-    cursor: pointer;
-    font-size: 0.875rem;
-    font-weight: 500;
-    transition: all 0.2s;
-    box-shadow: 0 2px 6px rgba(123, 104, 238, 0.3);
-  }
-
-  .refresh-btn:hover {
-    box-shadow: 0 4px 8px rgba(123, 104, 238, 0.4);
-    transform: translateY(-1px);
-  }
 
   /* Main Content */
   .main-content {
