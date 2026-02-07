@@ -3661,7 +3661,7 @@
                   scale: 1
                 },
                 offset: '0%',
-                repeat: '20px' // Espaçamento menor entre traços para ter mais traços e gaps menores
+                repeat: '22px' // Espaçamento menor entre traços para ter mais traços e gaps menores
               }];
               
               routePolyline = new google.maps.Polyline(routeConfig);
