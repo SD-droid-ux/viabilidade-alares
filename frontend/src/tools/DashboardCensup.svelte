@@ -405,8 +405,16 @@
                 <div class="chart-container">
                   <h2>Distribuição por Tabulação</h2>
                   <div class="pie-chart-wrapper">
-                    <!-- Debug info (remover depois) -->
-                    {#if pieChartData && pieChartData.length > 0}
+                    {#if statsData.stats && statsData.stats.length === 1 && statsData.total > 0}
+                      <!-- Caso especial: apenas uma tabulação (100%) - mostrar círculo completo -->
+                      <svg class="pie-chart" viewBox="0 0 400 400" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet">
+                        <circle cx="200" cy="200" r="150" fill={getTabulacaoColor(statsData.stats[0].label)} stroke="#fff" stroke-width="2" />
+                        <text x="200" y="200" text-anchor="middle" dominant-baseline="middle" fill="#fff" font-size="20" font-weight="bold" style="text-shadow: 1px 1px 3px rgba(0,0,0,0.5);">
+                          {statsData.stats[0].percentage}%
+                        </text>
+                      </svg>
+                    {:else if pieChartData && pieChartData.length > 0}
+                      <!-- Múltiplas tabulações - mostrar gráfico de pizza -->
                       <svg class="pie-chart" viewBox="0 0 400 400" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet">
                         {#each pieChartData as slice, index}
                           <path
@@ -432,14 +440,6 @@
                             </text>
                           {/if}
                         {/each}
-                      </svg>
-                    {:else if statsData.stats && statsData.stats.length > 0}
-                      <!-- Fallback: mostrar círculo com cor da primeira tabulação -->
-                      <svg class="pie-chart" viewBox="0 0 400 400" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet">
-                        <circle cx="200" cy="200" r="150" fill={getTabulacaoColor(statsData.stats[0].label)} stroke="#fff" stroke-width="2" />
-                        <text x="200" y="200" text-anchor="middle" dominant-baseline="middle" fill="#fff" font-size="16" font-weight="bold" style="text-shadow: 1px 1px 2px rgba(0,0,0,0.5);">
-                          100%
-                        </text>
                       </svg>
                     {:else}
                       <!-- Círculo vazio quando não há dados -->
