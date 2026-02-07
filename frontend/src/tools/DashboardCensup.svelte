@@ -161,7 +161,22 @@
     }
   });
 
-  // Cores para o gráfico de pizza (paleta roxa do portal)
+  // Mapeamento de cores específicas para cada tabulação
+  const tabulacaoColors = {
+    'Aprovado Com Portas': '#10B981', // Verde
+    'Aprovado Com Alívio de Rede/Cleanup': '#3B82F6', // Azul
+    'Aprovado Prédio Não Cabeado': '#8B5CF6', // Roxo claro
+    'Aprovado - Endereço não Localizado': '#F59E0B', // Laranja
+    'Fora da Área de Cobertura': '#EF4444', // Vermelho
+    'Não Informado': '#9CA3AF' // Cinza
+  };
+
+  // Função para obter cor da tabulação
+  function getTabulacaoColor(tabulacao) {
+    return tabulacaoColors[tabulacao] || '#7B68EE'; // Cor padrão roxa
+  }
+
+  // Cores para o gráfico de pizza (fallback se não houver cor específica)
   const pieColors = [
     '#7B68EE', '#8B5CF6', '#9D7AFF', '#A78BFA', '#C084FC',
     '#D8B4FE', '#E9D5FF', '#F3E8FF', '#6495ED', '#7C3AED'
@@ -170,15 +185,18 @@
   // Função para calcular dados do gráfico de pizza
   function getPieChartData(stats, total) {
     if (!stats || !Array.isArray(stats) || stats.length === 0 || !total || total === 0) {
+      console.log('⚠️ [PieChart] Dados inválidos:', { stats, total });
       return [];
     }
+
+    console.log('📊 [PieChart] Processando dados:', { stats, total });
 
     const centerX = 200;
     const centerY = 200;
     const radius = 150;
     let currentAngle = -90; // Começar do topo
 
-    return stats.map(stat => {
+    const slices = stats.map((stat, index) => {
       const sliceAngle = (stat.value / total) * 360;
       const startAngle = currentAngle;
       const endAngle = currentAngle + sliceAngle;
@@ -208,9 +226,15 @@
         path,
         labelX,
         labelY,
-        percentage: stat.percentage
+        percentage: stat.percentage,
+        label: stat.label,
+        value: stat.value,
+        color: getTabulacaoColor(stat.label)
       };
     });
+
+    console.log('✅ [PieChart] Slices gerados:', slices);
+    return slices;
   }
 
   // Função para calcular dados do gráfico de linha
@@ -381,36 +405,51 @@
                 <div class="chart-container">
                   <h2>Distribuição por Tabulação</h2>
                   <div class="pie-chart-wrapper">
-                    <svg class="pie-chart" viewBox="0 0 400 400" xmlns="http://www.w3.org/2000/svg">
-                      {#if pieChartData && pieChartData.length > 0}
+                    <!-- Debug info (remover depois) -->
+                    {#if pieChartData && pieChartData.length > 0}
+                      <svg class="pie-chart" viewBox="0 0 400 400" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet">
                         {#each pieChartData as slice, index}
                           <path
                             d={slice.path}
-                            fill={pieColors[index % pieColors.length]}
+                            fill={slice.color}
                             stroke="#fff"
                             stroke-width="2"
                             class="pie-slice"
+                            data-label={slice.label}
                           />
-                          <text
-                            x={slice.labelX}
-                            y={slice.labelY}
-                            text-anchor="middle"
-                            dominant-baseline="middle"
-                            fill="#fff"
-                            font-size="14"
-                            font-weight="bold"
-                          >
-                            {slice.percentage}%
-                          </text>
+                          {#if parseFloat(slice.percentage) >= 5}
+                            <text
+                              x={slice.labelX}
+                              y={slice.labelY}
+                              text-anchor="middle"
+                              dominant-baseline="middle"
+                              fill="#fff"
+                              font-size="14"
+                              font-weight="bold"
+                              style="text-shadow: 1px 1px 2px rgba(0,0,0,0.5); pointer-events: none;"
+                            >
+                              {slice.percentage}%
+                            </text>
+                          {/if}
                         {/each}
-                      {:else}
-                        <!-- Círculo vazio quando não há dados -->
+                      </svg>
+                    {:else if statsData.stats && statsData.stats.length > 0}
+                      <!-- Fallback: mostrar círculo com cor da primeira tabulação -->
+                      <svg class="pie-chart" viewBox="0 0 400 400" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet">
+                        <circle cx="200" cy="200" r="150" fill={getTabulacaoColor(statsData.stats[0].label)} stroke="#fff" stroke-width="2" />
+                        <text x="200" y="200" text-anchor="middle" dominant-baseline="middle" fill="#fff" font-size="16" font-weight="bold" style="text-shadow: 1px 1px 2px rgba(0,0,0,0.5);">
+                          100%
+                        </text>
+                      </svg>
+                    {:else}
+                      <!-- Círculo vazio quando não há dados -->
+                      <svg class="pie-chart" viewBox="0 0 400 400" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet">
                         <circle cx="200" cy="200" r="150" fill="rgba(123, 104, 238, 0.1)" stroke="rgba(123, 104, 238, 0.3)" stroke-width="2" />
                         <text x="200" y="200" text-anchor="middle" dominant-baseline="middle" fill="#7B68EE" font-size="16" font-weight="500">
                           Sem dados
                         </text>
-                      {/if}
-                    </svg>
+                      </svg>
+                    {/if}
                   </div>
                   
                   <!-- Legenda -->
@@ -419,7 +458,7 @@
                       <div class="legend-item">
                         <div 
                           class="legend-color" 
-                          style="background-color: {pieColors[index % pieColors.length]}"
+                          style="background-color: {getTabulacaoColor(stat.label)}"
                         ></div>
                         <span class="legend-label">{stat.label}</span>
                         <span class="legend-value">{stat.value} ({stat.percentage}%)</span>
