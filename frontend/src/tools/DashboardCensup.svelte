@@ -157,10 +157,10 @@
     }
   });
 
-  // Cores para o gráfico de pizza
+  // Cores para o gráfico de pizza (paleta roxa do portal)
   const pieColors = [
-    '#6366F1', '#8B5CF6', '#EC4899', '#F43F5E', '#EF4444',
-    '#F59E0B', '#10B981', '#06B6D4', '#3B82F6', '#6366F1'
+    '#7B68EE', '#8B5CF6', '#9D7AFF', '#A78BFA', '#C084FC',
+    '#D8B4FE', '#E9D5FF', '#F3E8FF', '#6495ED', '#7C3AED'
   ];
 
   // Função para calcular dados do gráfico de pizza
@@ -467,7 +467,7 @@
                           <polyline
                             points={item.points}
                             fill="none"
-                            stroke="#6366F1"
+                            stroke="#7B68EE"
                             stroke-width="3"
                             class="line-path"
                           />
@@ -478,7 +478,7 @@
                               cx={point.x}
                               cy={point.y}
                               r="5"
-                              fill="#6366F1"
+                              fill="#7B68EE"
                               stroke="#fff"
                               stroke-width="2"
                               class="data-point"
@@ -570,22 +570,24 @@
   /* Sidebar */
   .sidebar {
     width: 280px;
-    background: #fff;
-    border-right: 1px solid #e5e7eb;
+    background: rgba(255, 255, 255, 0.95);
+    border-right: 1px solid rgba(123, 104, 238, 0.2);
     display: flex;
     flex-direction: column;
     overflow-y: auto;
+    box-shadow: 2px 0 8px rgba(0, 0, 0, 0.05);
   }
 
   .sidebar-header {
     padding: 1.5rem;
-    border-bottom: 1px solid #e5e7eb;
+    border-bottom: 1px solid rgba(123, 104, 238, 0.2);
+    background: linear-gradient(135deg, #7B68EE 0%, #6495ED 100%);
   }
 
   .sidebar-header h2 {
     margin: 0;
     font-size: 1.25rem;
-    color: #1f2937;
+    color: #fff;
     font-weight: 600;
   }
 
@@ -607,17 +609,19 @@
     gap: 0.75rem;
     transition: all 0.2s;
     text-align: left;
-    color: #6b7280;
+    color: #5b21b6;
+    font-weight: 500;
   }
 
   .nav-item:hover {
-    background: #f3f4f6;
-    color: #1f2937;
+    background: rgba(123, 104, 238, 0.1);
+    color: #4c1d95;
   }
 
   .nav-item.active {
-    background: #6366F1;
+    background: linear-gradient(135deg, #7B68EE 0%, #6495ED 100%);
     color: #fff;
+    box-shadow: 0 2px 6px rgba(123, 104, 238, 0.3);
   }
 
   .nav-icon {
@@ -631,14 +635,15 @@
 
   .period-selector {
     padding: 1rem;
-    border-top: 1px solid #e5e7eb;
-    border-bottom: 1px solid #e5e7eb;
+    border-top: 1px solid rgba(123, 104, 238, 0.2);
+    border-bottom: 1px solid rgba(123, 104, 238, 0.2);
+    background: rgba(123, 104, 238, 0.05);
   }
 
   .period-selector h3 {
     margin: 0 0 0.75rem 0;
     font-size: 0.875rem;
-    color: #6b7280;
+    color: #4c1d95;
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.05em;
@@ -652,47 +657,51 @@
 
   .period-btn {
     padding: 0.5rem;
-    background: #f3f4f6;
-    border: 1px solid #e5e7eb;
+    background: rgba(255, 255, 255, 0.9);
+    border: 1px solid rgba(123, 104, 238, 0.2);
     border-radius: 6px;
     cursor: pointer;
     font-size: 0.75rem;
     font-weight: 500;
-    color: #6b7280;
+    color: #5b21b6;
     transition: all 0.2s;
   }
 
   .period-btn:hover {
-    background: #e5e7eb;
-    color: #1f2937;
+    background: rgba(123, 104, 238, 0.1);
+    border-color: #7B68EE;
+    color: #4c1d95;
   }
 
   .period-btn.active {
-    background: #6366F1;
+    background: linear-gradient(135deg, #7B68EE 0%, #6495ED 100%);
     color: #fff;
-    border-color: #6366F1;
+    border-color: #7B68EE;
+    box-shadow: 0 2px 4px rgba(123, 104, 238, 0.2);
   }
 
   .sidebar-footer {
     padding: 1rem;
-    border-top: 1px solid #e5e7eb;
+    border-top: 1px solid rgba(123, 104, 238, 0.2);
   }
 
   .refresh-btn {
     width: 100%;
     padding: 0.75rem;
-    background: #6366F1;
+    background: linear-gradient(135deg, #7B68EE 0%, #6495ED 100%);
     color: #fff;
     border: none;
     border-radius: 8px;
     cursor: pointer;
     font-size: 0.875rem;
     font-weight: 500;
-    transition: background 0.2s;
+    transition: all 0.2s;
+    box-shadow: 0 2px 6px rgba(123, 104, 238, 0.3);
   }
 
   .refresh-btn:hover {
-    background: #4f46e5;
+    box-shadow: 0 4px 8px rgba(123, 104, 238, 0.4);
+    transform: translateY(-1px);
   }
 
   /* Main Content */
@@ -703,22 +712,31 @@
   }
 
   .error-message {
-    background: #fee2e2;
-    border: 1px solid #fecaca;
+    background: rgba(254, 226, 226, 0.9);
+    border: 1px solid rgba(123, 104, 238, 0.3);
     color: #991b1b;
     padding: 1rem;
     border-radius: 8px;
     margin-bottom: 1rem;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
   }
 
   .error-message button {
     margin-top: 0.5rem;
     padding: 0.5rem 1rem;
-    background: #dc2626;
+    background: linear-gradient(135deg, #7B68EE 0%, #6495ED 100%);
     color: #fff;
     border: none;
     border-radius: 6px;
     cursor: pointer;
+    font-weight: 500;
+    transition: all 0.2s;
+    box-shadow: 0 2px 6px rgba(123, 104, 238, 0.3);
+  }
+
+  .error-message button:hover {
+    box-shadow: 0 4px 8px rgba(123, 104, 238, 0.4);
+    transform: translateY(-1px);
   }
 
   .report-section {
@@ -733,14 +751,15 @@
   .report-header h1 {
     margin: 0 0 0.5rem 0;
     font-size: 2rem;
-    color: #1f2937;
+    color: #4c1d95;
     font-weight: 600;
   }
 
   .subtitle {
     margin: 0;
-    color: #6b7280;
+    color: #5b21b6;
     font-size: 1rem;
+    opacity: 0.8;
   }
 
   .loading-container {
@@ -753,7 +772,11 @@
   .empty-state {
     text-align: center;
     padding: 3rem;
-    color: #6b7280;
+    color: #5b21b6;
+    background: rgba(255, 255, 255, 0.9);
+    border-radius: 12px;
+    border: 1px solid rgba(123, 104, 238, 0.2);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
   }
 
   .empty-state p {
@@ -768,17 +791,20 @@
   }
 
   .chart-container {
-    background: #fff;
+    background: rgba(255, 255, 255, 0.9);
     border-radius: 12px;
     padding: 2rem;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    border: 1px solid rgba(123, 104, 238, 0.2);
   }
 
   .chart-container h2 {
     margin: 0 0 1.5rem 0;
     font-size: 1.25rem;
-    color: #1f2937;
+    color: #4c1d95;
     font-weight: 600;
+    border-bottom: 2px solid #7B68EE;
+    padding-bottom: 0.75rem;
   }
 
   .pie-chart-wrapper {
@@ -825,35 +851,39 @@
   .legend-label {
     flex: 1;
     font-size: 0.875rem;
-    color: #374151;
+    color: #5b21b6;
+    font-weight: 500;
   }
 
   .legend-value {
     font-size: 0.875rem;
     font-weight: 600;
-    color: #1f2937;
+    color: #4c1d95;
   }
 
   .summary-card {
-    background: #fff;
+    background: rgba(255, 255, 255, 0.9);
     border-radius: 12px;
     padding: 2rem;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    border: 1px solid rgba(123, 104, 238, 0.2);
     height: fit-content;
   }
 
   .summary-card h3 {
     margin: 0 0 1.5rem 0;
     font-size: 1.25rem;
-    color: #1f2937;
+    color: #4c1d95;
     font-weight: 600;
+    border-bottom: 2px solid #7B68EE;
+    padding-bottom: 0.75rem;
   }
 
   .summary-item {
     display: flex;
     justify-content: space-between;
     padding: 1rem 0;
-    border-bottom: 1px solid #e5e7eb;
+    border-bottom: 1px solid rgba(123, 104, 238, 0.2);
   }
 
   .summary-item:last-child {
@@ -861,12 +891,13 @@
   }
 
   .summary-label {
-    color: #6b7280;
+    color: #5b21b6;
     font-size: 0.875rem;
+    font-weight: 500;
   }
 
   .summary-value {
-    color: #1f2937;
+    color: #4c1d95;
     font-size: 1.125rem;
     font-weight: 600;
   }
@@ -879,10 +910,11 @@
   }
 
   .line-chart-wrapper {
-    background: #fff;
+    background: rgba(255, 255, 255, 0.9);
     border-radius: 12px;
     padding: 2rem;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    border: 1px solid rgba(123, 104, 238, 0.2);
     overflow-x: auto;
   }
 
@@ -894,6 +926,7 @@
 
   .line-path {
     fill: none;
+    stroke: #7B68EE;
     stroke-linecap: round;
     stroke-linejoin: round;
   }
@@ -908,17 +941,20 @@
   }
 
   .data-table-container {
-    background: #fff;
+    background: rgba(255, 255, 255, 0.9);
     border-radius: 12px;
     padding: 2rem;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    border: 1px solid rgba(123, 104, 238, 0.2);
   }
 
   .data-table-container h3 {
     margin: 0 0 1.5rem 0;
     font-size: 1.25rem;
-    color: #1f2937;
+    color: #4c1d95;
     font-weight: 600;
+    border-bottom: 2px solid #7B68EE;
+    padding-bottom: 0.75rem;
   }
 
   .data-table {
@@ -927,7 +963,7 @@
   }
 
   .data-table thead {
-    background: #f9fafb;
+    background: rgba(123, 104, 238, 0.1);
   }
 
   .data-table th {
@@ -935,35 +971,35 @@
     text-align: left;
     font-size: 0.875rem;
     font-weight: 600;
-    color: #374151;
-    border-bottom: 2px solid #e5e7eb;
+    color: #4c1d95;
+    border-bottom: 2px solid #7B68EE;
   }
 
   .data-table td {
     padding: 0.75rem 1rem;
     font-size: 0.875rem;
-    color: #6b7280;
-    border-bottom: 1px solid #e5e7eb;
+    color: #5b21b6;
+    border-bottom: 1px solid rgba(123, 104, 238, 0.2);
   }
 
   .data-table tbody tr:hover {
-    background: #f9fafb;
+    background: rgba(123, 104, 238, 0.05);
   }
 
   .data-table tfoot {
-    background: #f9fafb;
+    background: rgba(123, 104, 238, 0.1);
     font-weight: 600;
   }
 
   .data-table tfoot td {
-    color: #1f2937;
-    border-top: 2px solid #e5e7eb;
+    color: #4c1d95;
+    border-top: 2px solid #7B68EE;
   }
 
   .count-cell {
     text-align: right;
     font-weight: 600;
-    color: #6366F1;
+    color: #7B68EE;
   }
 
   /* Responsividade */
