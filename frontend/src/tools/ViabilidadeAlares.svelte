@@ -3661,7 +3661,7 @@
                   scale: 1
                 },
                 offset: '0%',
-                repeat: '100px' // Espaçamento maior entre traços para criar gaps visíveis
+                repeat: '50px' // Espaçamento menor entre traços para ter mais traços e gaps menores
               }];
               
               routePolyline = new google.maps.Polyline(routeConfig);
@@ -3802,7 +3802,7 @@
                   scale: 1
                 },
                 offset: '0%',
-                repeat: '100px' // Espaçamento maior entre traços para criar gaps visíveis
+                repeat: '50px' // Espaçamento menor entre traços para ter mais traços e gaps menores
               }];
               
               routePolyline = new google.maps.Polyline(fallbackRouteConfig);
