@@ -37,8 +37,8 @@
   
   // Opacidades para rotas tracejadas quando CTO está fora do limite (acima de 250m)
   // Você pode ajustar essas opacidades independentemente
-  const ROUTE_ORANGE_OPACITY_OUT_OF_LIMIT = 0.5; // Opacidade dos traços laranja (0.0 a 1.0)
-  const ROUTE_GRAY_OPACITY_OUT_OF_LIMIT = 1.0; // Opacidade dos traços cinza (0.0 a 1.0)
+  const ROUTE_ORANGE_OPACITY_OUT_OF_LIMIT = 1.0; // Opacidade dos traços laranja (0.0 a 1.0)
+  const ROUTE_GRAY_OPACITY_OUT_OF_LIMIT = 0.5; // Opacidade dos traços cinza (0.0 a 1.0)
   
   // Configurações de cobertura
   const COVERAGE_OPACITY_DEFAULT = 0.4;
