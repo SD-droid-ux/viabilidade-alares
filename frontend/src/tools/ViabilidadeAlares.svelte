@@ -3644,16 +3644,16 @@
             
             // Se estiver fora do limite, adicionar estilo pontilhado
             if (cto.is_out_of_limit) {
-              // Criar padrão pontilhado usando icons
+              // Criar padrão pontilhado usando icons (mais evidente)
               routeConfig.icons = [{
                 icon: {
-                  path: 'M 0,-1 0,1',
+                  path: 'M -2,0 L 2,0', // Traço horizontal mais longo
                   strokeOpacity: 1,
-                  strokeWeight: 3,
-                  scale: 4
+                  strokeWeight: 5, // Espessura aumentada
+                  scale: 1
                 },
                 offset: '0%',
-                repeat: '20px'
+                repeat: '40px' // Espaçamento maior entre traços
               }];
             }
             
@@ -3769,13 +3769,13 @@
             if (cto.is_out_of_limit) {
               fallbackRouteConfig.icons = [{
                 icon: {
-                  path: 'M 0,-1 0,1',
+                  path: 'M -2,0 L 2,0', // Traço horizontal mais longo
                   strokeOpacity: 1,
-                  strokeWeight: 3,
-                  scale: 4
+                  strokeWeight: 5, // Espessura aumentada
+                  scale: 1
                 },
                 offset: '0%',
-                repeat: '20px'
+                repeat: '40px' // Espaçamento maior entre traços
               }];
             }
             
