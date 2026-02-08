@@ -461,16 +461,20 @@
                   </div>
                 </div>
 
-                <!-- Resumo -->
+                <!-- Total por Tabulação -->
                 <div class="summary-card">
-                  <h3>Resumo</h3>
-                  <div class="summary-item">
-                    <span class="summary-label">Total de Relatórios:</span>
-                    <span class="summary-value">{statsData.total}</span>
-                  </div>
-                  <div class="summary-item">
-                    <span class="summary-label">Tabulações Diferentes:</span>
-                    <span class="summary-value">{statsData.stats.length}</span>
+                  <h3>Total por Tabulação</h3>
+                  <div class="tabulacao-list">
+                    {#each statsData.stats as stat, index}
+                      <div class="tabulacao-item">
+                        <div 
+                          class="tabulacao-color-square" 
+                          style="background-color: {getTabulacaoColor(stat.label)}"
+                        ></div>
+                        <span class="tabulacao-name">{stat.label}</span>
+                        <span class="tabulacao-count">{stat.value}</span>
+                      </div>
+                    {/each}
                   </div>
                 </div>
               </div>
@@ -935,27 +939,47 @@
     padding-bottom: 0.75rem;
   }
 
-  .summary-item {
+  .tabulacao-list {
     display: flex;
-    justify-content: space-between;
-    padding: 1rem 0;
-    border-bottom: 1px solid rgba(123, 104, 238, 0.2);
+    flex-direction: column;
+    gap: 0.75rem;
   }
 
-  .summary-item:last-child {
-    border-bottom: none;
+  .tabulacao-item {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.75rem;
+    border-radius: 8px;
+    transition: background 0.2s;
   }
 
-  .summary-label {
+  .tabulacao-item:hover {
+    background: rgba(123, 104, 238, 0.05);
+  }
+
+  .tabulacao-color-square {
+    width: 20px;
+    height: 20px;
+    border-radius: 4px;
+    flex-shrink: 0;
+    border: 2px solid rgba(255, 255, 255, 0.8);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+  }
+
+  .tabulacao-name {
+    flex: 1;
     color: #5b21b6;
     font-size: 0.875rem;
     font-weight: 500;
   }
 
-  .summary-value {
+  .tabulacao-count {
     color: #4c1d95;
-    font-size: 1.125rem;
+    font-size: 1rem;
     font-weight: 600;
+    min-width: 40px;
+    text-align: right;
   }
 
   /* Timeline Container */
