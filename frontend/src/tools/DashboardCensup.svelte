@@ -38,6 +38,13 @@
   let loadingTimeline = false;
   let error = null;
   
+  // Estados do upload
+  let uploadingFile = false;
+  let uploadProgress = 0;
+  let uploadError = null;
+  let uploadSuccess = false;
+  let selectedFile = null;
+  
   // Intervalo para atualização automática
   let refreshInterval = null;
   const REFRESH_INTERVAL_MS = 60000; // 1 minuto
@@ -50,6 +57,98 @@
   // Função para pré-carregar configurações no hover
   function preloadSettingsData() {
     // Pré-carregar dados se necessário
+  }
+  
+  // Função para fechar configurações
+  function closeSettingsModal() {
+    showSettingsModal = false;
+    uploadError = null;
+    uploadSuccess = false;
+    selectedFile = null;
+    uploadProgress = 0;
+  }
+  
+  // Função para selecionar arquivo
+  function handleFileSelect(event) {
+    const file = event.target.files[0];
+    if (file) {
+      // Verificar se é um arquivo Excel
+      const validExtensions = ['.xlsx', '.xls'];
+      const fileExtension = '.' + file.name.split('.').pop().toLowerCase();
+      
+      if (!validExtensions.includes(fileExtension)) {
+        uploadError = 'Por favor, selecione um arquivo Excel (.xlsx ou .xls)';
+        return;
+      }
+      
+      selectedFile = file;
+      uploadError = null;
+      uploadSuccess = false;
+    }
+  }
+  
+  // Função para fazer upload do arquivo
+  async function uploadBaseFile() {
+    if (!selectedFile) {
+      uploadError = 'Por favor, selecione um arquivo antes de fazer upload';
+      return;
+    }
+    
+    uploadingFile = true;
+    uploadError = null;
+    uploadSuccess = false;
+    uploadProgress = 0;
+    
+    try {
+      const formData = new FormData();
+      formData.append('file', selectedFile);
+      
+      const apiUrl = getApiUrl('/api/vi-ala/upload-base');
+      
+      // Simular progresso (já que não temos progresso real do servidor)
+      const progressInterval = setInterval(() => {
+        if (uploadProgress < 90) {
+          uploadProgress += 10;
+        }
+      }, 200);
+      
+      const response = await fetch(apiUrl, {
+        method: 'POST',
+        body: formData
+      });
+      
+      clearInterval(progressInterval);
+      uploadProgress = 100;
+      
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ error: 'Erro desconhecido' }));
+        throw new Error(errorData.error || `HTTP ${response.status}: ${await response.text()}`);
+      }
+      
+      const data = await response.json();
+      
+      if (data.success) {
+        uploadSuccess = true;
+        selectedFile = null;
+        
+        // Recarregar dados do dashboard
+        await loadStats();
+        await loadTimeline();
+        
+        // Limpar mensagem de sucesso após 3 segundos
+        setTimeout(() => {
+          uploadSuccess = false;
+        }, 3000);
+      } else {
+        throw new Error(data.error || 'Erro ao fazer upload do arquivo');
+      }
+    } catch (err) {
+      console.error('Erro ao fazer upload:', err);
+      uploadError = err.message || 'Erro ao fazer upload do arquivo';
+      uploadProgress = 0;
+    } finally {
+      uploadingFile = false;
+    }
   }
 
   // Função para carregar estatísticas
@@ -605,6 +704,75 @@
       </main>
     </div>
   {/if}
+  
+  <!-- Modal de Configurações -->
+  {#if showSettingsModal}
+    <div class="settings-modal-overlay" on:click={closeSettingsModal} on:keydown={(e) => e.key === 'Escape' && closeSettingsModal()}>
+      <div class="settings-modal" on:click|stopPropagation>
+        <div class="settings-modal-header">
+          <h2>⚙️ Configurações - Dashboard CENSUP</h2>
+          <button class="close-btn" on:click={closeSettingsModal}>✕</button>
+        </div>
+        
+        <div class="settings-modal-content">
+          <div class="settings-section">
+            <h3>📤 Upload de Base de Dados</h3>
+            <p class="settings-description">
+              Faça upload de um arquivo Excel (.xlsx ou .xls) com os dados da base VI ALA.
+              O arquivo deve conter as colunas: VI ALA, ALA, DATA, PROJETISTA, CIDADE, ENDEREÇO, LATITUDE, LONGITUDE, TABULAÇÃO FINAL.
+            </p>
+            
+            <div class="upload-section">
+              <div class="file-input-wrapper">
+                <input
+                  type="file"
+                  id="baseFileInput"
+                  accept=".xlsx,.xls"
+                  on:change={handleFileSelect}
+                  disabled={uploadingFile}
+                  style="display: none;"
+                />
+                <label for="baseFileInput" class="file-input-label" class:disabled={uploadingFile}>
+                  {#if selectedFile}
+                    📄 {selectedFile.name}
+                  {:else}
+                    📁 Selecionar Arquivo Excel
+                  {/if}
+                </label>
+              </div>
+              
+              {#if selectedFile && !uploadingFile}
+                <button class="upload-btn" on:click={uploadBaseFile}>
+                  ⬆️ Fazer Upload
+                </button>
+              {/if}
+              
+              {#if uploadingFile}
+                <div class="upload-progress">
+                  <div class="progress-bar">
+                    <div class="progress-fill" style="width: {uploadProgress}%"></div>
+                  </div>
+                  <p class="progress-text">Enviando... {uploadProgress}%</p>
+                </div>
+              {/if}
+              
+              {#if uploadError}
+                <div class="upload-error">
+                  ❌ {uploadError}
+                </div>
+              {/if}
+              
+              {#if uploadSuccess}
+                <div class="upload-success">
+                  ✅ Arquivo enviado com sucesso! Os dados foram atualizados.
+                </div>
+              {/if}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  {/if}
 </div>
 
 <style>
@@ -1108,5 +1276,185 @@
     .period-buttons {
       grid-template-columns: repeat(3, 1fr);
     }
+  }
+
+  /* Modal de Configurações */
+  .settings-modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.5);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 10000;
+    backdrop-filter: blur(4px);
+  }
+
+  .settings-modal {
+    background: #fff;
+    border-radius: 12px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+    width: 90%;
+    max-width: 600px;
+    max-height: 90vh;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .settings-modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 1.5rem;
+    border-bottom: 2px solid #7B68EE;
+    background: linear-gradient(135deg, #7B68EE 0%, #6495ED 100%);
+    color: #fff;
+  }
+
+  .settings-modal-header h2 {
+    margin: 0;
+    font-size: 1.25rem;
+    font-weight: 600;
+  }
+
+  .close-btn {
+    background: rgba(255, 255, 255, 0.2);
+    border: none;
+    color: #fff;
+    font-size: 1.5rem;
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.2s;
+  }
+
+  .close-btn:hover {
+    background: rgba(255, 255, 255, 0.3);
+  }
+
+  .settings-modal-content {
+    padding: 1.5rem;
+  }
+
+  .settings-section {
+    margin-bottom: 2rem;
+  }
+
+  .settings-section h3 {
+    margin: 0 0 0.75rem 0;
+    color: #4c1d95;
+    font-size: 1.125rem;
+    font-weight: 600;
+  }
+
+  .settings-description {
+    margin: 0 0 1rem 0;
+    color: #6b7280;
+    font-size: 0.875rem;
+    line-height: 1.5;
+  }
+
+  .upload-section {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+  }
+
+  .file-input-wrapper {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  .file-input-label {
+    padding: 0.75rem 1rem;
+    background: linear-gradient(135deg, #7B68EE 0%, #6495ED 100%);
+    color: #fff;
+    border-radius: 8px;
+    cursor: pointer;
+    text-align: center;
+    font-weight: 500;
+    transition: all 0.2s;
+    border: 2px solid transparent;
+  }
+
+  .file-input-label:hover:not(.disabled) {
+    box-shadow: 0 4px 8px rgba(123, 104, 238, 0.3);
+    transform: translateY(-1px);
+  }
+
+  .file-input-label.disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+
+  .upload-btn {
+    padding: 0.75rem 1.5rem;
+    background: linear-gradient(135deg, #10B981 0%, #059669 100%);
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    font-weight: 500;
+    font-size: 0.875rem;
+    transition: all 0.2s;
+  }
+
+  .upload-btn:hover {
+    box-shadow: 0 4px 8px rgba(16, 185, 129, 0.3);
+    transform: translateY(-1px);
+  }
+
+  .upload-progress {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  .progress-bar {
+    width: 100%;
+    height: 8px;
+    background: #e5e7eb;
+    border-radius: 4px;
+    overflow: hidden;
+  }
+
+  .progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #7B68EE 0%, #6495ED 100%);
+    transition: width 0.3s;
+  }
+
+  .progress-text {
+    margin: 0;
+    color: #6b7280;
+    font-size: 0.875rem;
+    text-align: center;
+  }
+
+  .upload-error {
+    padding: 0.75rem;
+    background: #FEE2E2;
+    border: 1px solid #FCA5A5;
+    border-radius: 8px;
+    color: #DC2626;
+    font-size: 0.875rem;
+  }
+
+  .upload-success {
+    padding: 0.75rem;
+    background: #D1FAE5;
+    border: 1px solid #6EE7B7;
+    border-radius: 8px;
+    color: #059669;
+    font-size: 0.875rem;
   }
 </style>
