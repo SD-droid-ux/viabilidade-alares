@@ -8413,6 +8413,174 @@ app.get('/api/vi-ala.xlsx', async (req, res) => {
   }
 });
 
+// Rota para upload da base VI ALA
+app.post('/api/vi-ala/upload-base', upload.single('file'), async (req, res) => {
+  // Garantir headers CORS
+  const origin = req.headers.origin;
+  if (origin) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+  } else {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+  }
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
+  
+  try {
+    if (!req.file) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'Nenhum arquivo foi enviado' 
+      });
+    }
+
+    // Verificar se é um arquivo Excel
+    const allowedMimes = [
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'application/vnd.ms-excel',
+      'application/octet-stream'
+    ];
+    
+    if (!allowedMimes.includes(req.file.mimetype) && !req.file.originalname.match(/\.(xlsx|xls)$/i)) {
+      // Limpar arquivo temporário
+      if (fs.existsSync(req.file.path)) {
+        fs.unlinkSync(req.file.path);
+      }
+      return res.status(400).json({
+        success: false,
+        error: 'Formato de arquivo inválido. Apenas arquivos Excel (.xlsx ou .xls) são aceitos.'
+      });
+    }
+
+    console.log(`📤 [Upload VI ALA] Arquivo recebido: ${req.file.originalname} (${req.file.size} bytes)`);
+    
+    // Ler dados do arquivo Excel
+    const fileBuffer = await fsPromises.readFile(req.file.path);
+    const workbook = XLSX.read(fileBuffer, { type: 'buffer' });
+    const sheetName = workbook.SheetNames[0];
+    const worksheet = workbook.Sheets[sheetName];
+    const data = XLSX.utils.sheet_to_json(worksheet);
+    
+    // Limpar arquivo temporário
+    if (fs.existsSync(req.file.path)) {
+      fs.unlinkSync(req.file.path);
+    }
+    
+    if (!data || data.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'O arquivo Excel está vazio ou não contém dados válidos.'
+      });
+    }
+    
+    // Validar colunas esperadas
+    const expectedColumns = ['VI ALA', 'ALA', 'DATA', 'PROJETISTA', 'CIDADE', 'ENDEREÇO', 'LATITUDE', 'LONGITUDE', 'TABULAÇÃO FINAL'];
+    const firstRow = data[0];
+    const hasAllColumns = expectedColumns.every(col => firstRow.hasOwnProperty(col));
+    
+    if (!hasAllColumns) {
+      const missingColumns = expectedColumns.filter(col => !firstRow.hasOwnProperty(col));
+      return res.status(400).json({
+        success: false,
+        error: `O arquivo não contém todas as colunas necessárias. Colunas faltando: ${missingColumns.join(', ')}`
+      });
+    }
+    
+    console.log(`📊 [Upload VI ALA] Processando ${data.length} registros...`);
+    
+    // Salvar dados no Supabase (se disponível) ou Excel (fallback)
+    let savedCount = 0;
+    let errors = [];
+    
+    // Se Supabase estiver disponível, salvar lá
+    if (supabase && isSupabaseAvailable()) {
+      console.log('💾 [Upload VI ALA] Salvando no Supabase...');
+      
+      // Limpar tabela antes de inserir novos dados (opcional - você pode querer fazer merge)
+      // Por enquanto, vamos inserir todos os registros
+      const recordsToInsert = data.map(row => ({
+        vi_ala: row['VI ALA'] || '',
+        ala: row['ALA'] || '',
+        data: row['DATA'] || '',
+        projetista: row['PROJETISTA'] || '',
+        cidade: row['CIDADE'] || '',
+        endereco: row['ENDEREÇO'] || '',
+        latitude: row['LATITUDE'] || '',
+        longitude: row['LONGITUDE'] || '',
+        tabulacao_final: row['TABULAÇÃO FINAL'] || ''
+      }));
+      
+      // Inserir em lotes para evitar timeout
+      const batchSize = 100;
+      for (let i = 0; i < recordsToInsert.length; i += batchSize) {
+        const batch = recordsToInsert.slice(i, i + batchSize);
+        const { error: insertError } = await supabase
+          .from('vi_ala')
+          .insert(batch);
+        
+        if (insertError) {
+          console.error(`❌ [Upload VI ALA] Erro ao inserir lote ${i / batchSize + 1}:`, insertError);
+          errors.push(`Erro no lote ${i / batchSize + 1}: ${insertError.message}`);
+        } else {
+          savedCount += batch.length;
+        }
+      }
+      
+      console.log(`✅ [Upload VI ALA] ${savedCount} registros salvos no Supabase`);
+    } else {
+      // Fallback: salvar no Excel
+      console.log('💾 [Upload VI ALA] Salvando no Excel (fallback)...');
+      
+      // Normalizar dados para o formato esperado
+      const normalizedData = data.map(row => ({
+        'VI ALA': row['VI ALA'] || '',
+        'ALA': row['ALA'] || '',
+        'DATA': row['DATA'] || '',
+        'PROJETISTA': row['PROJETISTA'] || '',
+        'CIDADE': row['CIDADE'] || '',
+        'ENDEREÇO': row['ENDEREÇO'] || '',
+        'LATITUDE': row['LATITUDE'] || '',
+        'LONGITUDE': row['LONGITUDE'] || '',
+        'TABULAÇÃO FINAL': row['TABULAÇÃO FINAL'] || ''
+      }));
+      
+      // Salvar no Excel usando lock
+      await withLock('vi_ala', async () => {
+        const worksheet = XLSX.utils.json_to_sheet(normalizedData);
+        const workbook = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(workbook, worksheet, 'VI ALA');
+        XLSX.writeFile(workbook, BASE_VI_ALA_FILE);
+      });
+      
+      savedCount = normalizedData.length;
+      console.log(`✅ [Upload VI ALA] ${savedCount} registros salvos no Excel`);
+    }
+    
+    return res.json({
+      success: true,
+      message: `Base de dados atualizada com sucesso! ${savedCount} registros processados.`,
+      recordsProcessed: savedCount,
+      errors: errors.length > 0 ? errors : undefined
+    });
+    
+  } catch (err) {
+    console.error('❌ [Upload VI ALA] Erro ao processar upload:', err);
+    console.error('❌ [Upload VI ALA] Stack:', err.stack);
+    
+    // Limpar arquivo temporário em caso de erro
+    if (req.file && fs.existsSync(req.file.path)) {
+      try {
+        fs.unlinkSync(req.file.path);
+      } catch (unlinkErr) {
+        console.error('❌ [Upload VI ALA] Erro ao limpar arquivo temporário:', unlinkErr);
+      }
+    }
+    
+    return res.status(500).json({
+      success: false,
+      error: err.message || 'Erro ao processar upload do arquivo'
+    });
+  }
+});
+
 // Rota catch-all para rotas não encontradas (sempre retorna JSON)
 app.use((req, res) => {
   console.log(`⚠️ [404] Rota não encontrada: ${req.method} ${req.path}`);
