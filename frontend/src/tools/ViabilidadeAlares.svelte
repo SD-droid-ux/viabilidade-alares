@@ -6180,7 +6180,9 @@
       const now = new Date();
       const dateStr = now.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' });
       const timeStr = now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
-      // Salvar data e hora juntas no formato legível DD/MM/YYYY HH:MM
+      // Formato da hora: "20:30h"
+      const horaFormatada = `${timeStr}h`;
+      // Salvar data e hora juntas no formato legível DD/MM/YYYY HH:MM (para compatibilidade)
       const dataHoraLegivel = `${dateStr} ${timeStr}`;
       
       // Salvar registro na base_VI_ALA apenas se o VI ALA foi obtido com sucesso
@@ -6188,7 +6190,8 @@
         const viAlaRecord = {
           viAla: currentVIALA,
           ala: reportForm.numeroALA || '',
-          data: dataHoraLegivel, // Salvar data e hora juntas no formato legível
+          data: dataHoraLegivel, // Salvar data e hora juntas no formato legível (para compatibilidade)
+          hora: horaFormatada, // Nova coluna: hora separada no formato "20:30h"
           projetista: reportForm.projetista || '',
           cidade: reportForm.cidade || '',
           endereco: reportForm.enderecoCompleto || '',
