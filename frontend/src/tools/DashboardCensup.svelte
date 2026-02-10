@@ -17,6 +17,7 @@
   // Estados do dashboard
   let activeReport = 'stats'; // 'stats' ou 'timeline'
   let selectedPeriod = 'DIA'; // DIA, SEMANA, MÊS, TRIMESTRE, SEMESTRE, ANUAL
+  let showPeriodDropdown = false; // Controla abertura do dropdown de período
   
   // Dados das APIs
   let statsData = {
@@ -247,6 +248,9 @@
         refreshActiveReport();
       }, REFRESH_INTERVAL_MS);
       
+      // Fechar dropdown ao clicar fora
+      document.addEventListener('click', handleClickOutside);
+      
     } catch (err) {
       console.error('Erro ao inicializar ferramenta:', err);
       isLoading = false;
@@ -258,6 +262,7 @@
     if (refreshInterval) {
       clearInterval(refreshInterval);
     }
+    document.removeEventListener('click', handleClickOutside);
   });
 
   // Mapeamento de cores específicas para cada tabulação
@@ -424,43 +429,6 @@
           </button>
         </nav>
         
-        {#if activeReport === 'timeline'}
-          <div class="period-selector">
-            <h3>Período</h3>
-            <div class="period-buttons">
-              <button 
-                class="period-btn"
-                class:active={selectedPeriod === 'DIA'}
-                on:click={() => changePeriod('DIA')}
-              >Dia</button>
-              <button 
-                class="period-btn"
-                class:active={selectedPeriod === 'SEMANA'}
-                on:click={() => changePeriod('SEMANA')}
-              >Semana</button>
-              <button 
-                class="period-btn"
-                class:active={selectedPeriod === 'MÊS'}
-                on:click={() => changePeriod('MÊS')}
-              >Mês</button>
-              <button 
-                class="period-btn"
-                class:active={selectedPeriod === 'TRIMESTRE'}
-                on:click={() => changePeriod('TRIMESTRE')}
-              >Trimestre</button>
-              <button 
-                class="period-btn"
-                class:active={selectedPeriod === 'SEMESTRE'}
-                on:click={() => changePeriod('SEMESTRE')}
-              >Semestre</button>
-              <button 
-                class="period-btn"
-                class:active={selectedPeriod === 'ANUAL'}
-                on:click={() => changePeriod('ANUAL')}
-              >Anual</button>
-            </div>
-          </div>
-        {/if}
       </aside>
 
       <!-- Área de Conteúdo -->
@@ -583,8 +551,68 @@
           <!-- Relatório de Timeline -->
           <div class="report-section">
             <div class="report-header">
-              <h1>Evolução Temporal</h1>
-              <p class="subtitle">Quantidade de VI ALAs gerados ao longo do tempo</p>
+              <div class="header-content">
+                <div>
+                  <h1>Evolução Temporal</h1>
+                  <p class="subtitle">Quantidade de VI ALAs gerados ao longo do tempo</p>
+                </div>
+                <div class="period-dropdown-container" on:click|stopPropagation>
+                  <button 
+                    class="period-dropdown-btn"
+                    on:click={() => showPeriodDropdown = !showPeriodDropdown}
+                    on:keydown={(e) => e.key === 'Escape' && (showPeriodDropdown = false)}
+                  >
+                    <span>📅 Período: {getPeriodLabel(selectedPeriod)}</span>
+                    <span class="dropdown-arrow" class:open={showPeriodDropdown}>▼</span>
+                  </button>
+                  {#if showPeriodDropdown}
+                    <div class="period-dropdown-menu">
+                      <button 
+                        class="period-option"
+                        class:active={selectedPeriod === 'DIA'}
+                        on:click={() => changePeriod('DIA')}
+                      >
+                        Dia
+                      </button>
+                      <button 
+                        class="period-option"
+                        class:active={selectedPeriod === 'SEMANA'}
+                        on:click={() => changePeriod('SEMANA')}
+                      >
+                        Semana
+                      </button>
+                      <button 
+                        class="period-option"
+                        class:active={selectedPeriod === 'MÊS'}
+                        on:click={() => changePeriod('MÊS')}
+                      >
+                        Mês
+                      </button>
+                      <button 
+                        class="period-option"
+                        class:active={selectedPeriod === 'TRIMESTRE'}
+                        on:click={() => changePeriod('TRIMESTRE')}
+                      >
+                        Trimestre
+                      </button>
+                      <button 
+                        class="period-option"
+                        class:active={selectedPeriod === 'SEMESTRE'}
+                        on:click={() => changePeriod('SEMESTRE')}
+                      >
+                        Semestre
+                      </button>
+                      <button 
+                        class="period-option"
+                        class:active={selectedPeriod === 'ANUAL'}
+                        on:click={() => changePeriod('ANUAL')}
+                      >
+                        Anual
+                      </button>
+                    </div>
+                  {/if}
+                </div>
+              </div>
             </div>
 
             {#if loadingTimeline}
