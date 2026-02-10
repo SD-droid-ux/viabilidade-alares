@@ -16,8 +16,12 @@
   
   // Estados do dashboard
   let activeReport = 'stats'; // 'stats' ou 'timeline'
-  let selectedPeriod = 'DIA'; // DIA, SEMANA, MÊS, TRIMESTRE, SEMESTRE, ANUAL
-  let showPeriodDropdown = false; // Controla abertura do dropdown de período
+  let selectedPeriod = 'DIA'; // DIA, SEMANA, MÊS, TRIMESTRE, SEMESTRE, ANUAL, HORA
+  let showPeriodModal = false; // Controla abertura do modal de período
+  let dateFilterMode = 'period'; // 'period' ou 'custom'
+  let startDate = '';
+  let endDate = '';
+  let selectedDate = new Date().toISOString().split('T')[0]; // Data selecionada no calendário
   
   // Dados das APIs
   let statsData = {
@@ -184,7 +188,14 @@
     error = null;
     
     try {
-      const response = await fetch(getApiUrl(`/api/vi-ala/timeline?period=${selectedPeriod}`));
+      let url = `/api/vi-ala/timeline?period=${selectedPeriod}`;
+      
+      // Se estiver em modo customizado, adicionar filtros de data
+      if (dateFilterMode === 'custom' && startDate && endDate) {
+        url += `&startDate=${startDate}&endDate=${endDate}`;
+      }
+      
+      const response = await fetch(getApiUrl(url));
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}: ${await response.text()}`);
       }
@@ -215,10 +226,80 @@
   // Função para mudar período
   async function changePeriod(period) {
     selectedPeriod = period;
-    showPeriodDropdown = false; // Fechar dropdown após seleção
+    dateFilterMode = 'period'; // Resetar para modo período
+    startDate = '';
+    endDate = '';
     if (activeReport === 'timeline') {
       await loadTimeline();
     }
+  }
+  
+  // Função para aplicar filtro customizado
+  async function applyCustomDateFilter() {
+    if (!startDate || !endDate) {
+      error = 'Por favor, selecione as datas inicial e final';
+      return;
+    }
+    
+    if (new Date(startDate) > new Date(endDate)) {
+      error = 'A data inicial não pode ser maior que a data final';
+      return;
+    }
+    
+    dateFilterMode = 'custom';
+    showPeriodModal = false;
+    
+    if (activeReport === 'timeline') {
+      await loadTimeline();
+    }
+  }
+  
+  // Função para aplicar período rápido
+  function applyQuickPeriod(period) {
+    const today = new Date();
+    const yesterday = new Date(today);
+    yesterday.setDate(yesterday.getDate() - 1);
+    const lastWeek = new Date(today);
+    lastWeek.setDate(lastWeek.getDate() - 7);
+    const lastMonth = new Date(today);
+    lastMonth.setMonth(lastMonth.getMonth() - 1);
+    
+    switch (period) {
+      case 'today':
+        startDate = today.toISOString().split('T')[0];
+        endDate = today.toISOString().split('T')[0];
+        break;
+      case 'yesterday':
+        startDate = yesterday.toISOString().split('T')[0];
+        endDate = yesterday.toISOString().split('T')[0];
+        break;
+      case 'lastWeek':
+        startDate = lastWeek.toISOString().split('T')[0];
+        endDate = today.toISOString().split('T')[0];
+        break;
+      case 'lastMonth':
+        startDate = lastMonth.toISOString().split('T')[0];
+        endDate = today.toISOString().split('T')[0];
+        break;
+    }
+    
+    applyCustomDateFilter();
+  }
+  
+  // Função para formatar data para exibição
+  function formatDateRange() {
+    if (dateFilterMode === 'custom' && startDate && endDate) {
+      const start = new Date(startDate);
+      const end = new Date(endDate);
+      const startFormatted = start.toLocaleDateString('pt-BR');
+      const endFormatted = end.toLocaleDateString('pt-BR');
+      
+      if (startDate === endDate) {
+        return startFormatted;
+      }
+      return `${startFormatted} - ${endFormatted}`;
+    }
+    return getPeriodLabel(selectedPeriod);
   }
   
   // Função para obter o nome do período formatado
@@ -578,68 +659,14 @@
                   <h1>Evolução Temporal</h1>
                   <p class="subtitle">Quantidade de VI ALAs gerados ao longo do tempo</p>
                 </div>
-                <div class="period-dropdown-container" on:click|stopPropagation>
+                <div class="period-filter-container">
                   <button 
-                    class="period-dropdown-btn"
-                    on:click={() => showPeriodDropdown = !showPeriodDropdown}
-                    on:keydown={(e) => e.key === 'Escape' && (showPeriodDropdown = false)}
+                    class="period-filter-btn"
+                    on:click={() => showPeriodModal = true}
                   >
-                    <span>📅 Período: {getPeriodLabel(selectedPeriod)}</span>
-                    <span class="dropdown-arrow" class:open={showPeriodDropdown}>▼</span>
+                    <span>📅 {dateFilterMode === 'custom' ? formatDateRange() : `Período: ${getPeriodLabel(selectedPeriod)}`}</span>
+                    <span class="filter-icon">⚙️</span>
                   </button>
-                  {#if showPeriodDropdown}
-                    <div class="period-dropdown-menu">
-                      <button 
-                        class="period-option"
-                        class:active={selectedPeriod === 'HORA'}
-                        on:click={() => changePeriod('HORA')}
-                      >
-                        Hora
-                      </button>
-                      <button 
-                        class="period-option"
-                        class:active={selectedPeriod === 'DIA'}
-                        on:click={() => changePeriod('DIA')}
-                      >
-                        Dia
-                      </button>
-                      <button 
-                        class="period-option"
-                        class:active={selectedPeriod === 'SEMANA'}
-                        on:click={() => changePeriod('SEMANA')}
-                      >
-                        Semana
-                      </button>
-                      <button 
-                        class="period-option"
-                        class:active={selectedPeriod === 'MÊS'}
-                        on:click={() => changePeriod('MÊS')}
-                      >
-                        Mês
-                      </button>
-                      <button 
-                        class="period-option"
-                        class:active={selectedPeriod === 'TRIMESTRE'}
-                        on:click={() => changePeriod('TRIMESTRE')}
-                      >
-                        Trimestre
-                      </button>
-                      <button 
-                        class="period-option"
-                        class:active={selectedPeriod === 'SEMESTRE'}
-                        on:click={() => changePeriod('SEMESTRE')}
-                      >
-                        Semestre
-                      </button>
-                      <button 
-                        class="period-option"
-                        class:active={selectedPeriod === 'ANUAL'}
-                        on:click={() => changePeriod('ANUAL')}
-                      >
-                        Anual
-                      </button>
-                    </div>
-                  {/if}
                 </div>
               </div>
             </div>
@@ -759,6 +786,304 @@
           </div>
         {/if}
       </main>
+    </div>
+  {/if}
+  
+  <!-- Modal de Filtro de Período -->
+  {#if showPeriodModal}
+    <div class="period-modal-overlay" on:click={() => showPeriodModal = false} on:keydown={(e) => e.key === 'Escape' && (showPeriodModal = false)}>
+      <div class="period-modal" on:click|stopPropagation>
+        <div class="period-modal-header">
+          <h2>📅 Filtrar por Período</h2>
+          <button class="close-btn" on:click={() => showPeriodModal = false}>✕</button>
+        </div>
+        
+        <div class="period-modal-content">
+          <!-- Modo de Seleção -->
+          <div class="filter-mode-selector">
+            <button 
+              class="mode-btn"
+              class:active={dateFilterMode === 'period'}
+              on:click={() => dateFilterMode = 'period'}
+            >
+              Período Pré-definido
+            </button>
+            <button 
+              class="mode-btn"
+              class:active={dateFilterMode === 'custom'}
+              on:click={() => dateFilterMode = 'custom'}
+            >
+              Intervalo Personalizado
+            </button>
+          </div>
+          
+          {#if dateFilterMode === 'period'}
+            <!-- Seleção de Período Pré-definido -->
+            <div class="period-options-grid">
+              <button 
+                class="period-option-btn"
+                class:active={selectedPeriod === 'HORA'}
+                on:click={() => changePeriod('HORA')}
+              >
+                Hora
+              </button>
+              <button 
+                class="period-option-btn"
+                class:active={selectedPeriod === 'DIA'}
+                on:click={() => changePeriod('DIA')}
+              >
+                Dia
+              </button>
+              <button 
+                class="period-option-btn"
+                class:active={selectedPeriod === 'SEMANA'}
+                on:click={() => changePeriod('SEMANA')}
+              >
+                Semana
+              </button>
+              <button 
+                class="period-option-btn"
+                class:active={selectedPeriod === 'MÊS'}
+                on:click={() => changePeriod('MÊS')}
+              >
+                Mês
+              </button>
+              <button 
+                class="period-option-btn"
+                class:active={selectedPeriod === 'TRIMESTRE'}
+                on:click={() => changePeriod('TRIMESTRE')}
+              >
+                Trimestre
+              </button>
+              <button 
+                class="period-option-btn"
+                class:active={selectedPeriod === 'SEMESTRE'}
+                on:click={() => changePeriod('SEMESTRE')}
+              >
+                Semestre
+              </button>
+              <button 
+                class="period-option-btn"
+                class:active={selectedPeriod === 'ANUAL'}
+                on:click={() => changePeriod('ANUAL')}
+              >
+                Anual
+              </button>
+            </div>
+          {:else}
+            <!-- Intervalo Personalizado -->
+            <div class="custom-date-filter">
+              <div class="quick-periods">
+                <h3>Períodos Rápidos</h3>
+                <div class="quick-buttons">
+                  <button class="quick-btn" on:click={() => applyQuickPeriod('today')}>
+                    Hoje
+                  </button>
+                  <button class="quick-btn" on:click={() => applyQuickPeriod('yesterday')}>
+                    Ontem
+                  </button>
+                  <button class="quick-btn" on:click={() => applyQuickPeriod('lastWeek')}>
+                    Última Semana
+                  </button>
+                  <button class="quick-btn" on:click={() => applyQuickPeriod('lastMonth')}>
+                    Último Mês
+                  </button>
+                </div>
+              </div>
+              
+              <div class="date-inputs">
+                <div class="date-input-group">
+                  <label for="startDate">Data Inicial</label>
+                  <input 
+                    type="date" 
+                    id="startDate"
+                    bind:value={startDate}
+                    max={endDate || undefined}
+                  />
+                </div>
+                
+                <div class="date-input-group">
+                  <label for="endDate">Data Final</label>
+                  <input 
+                    type="date" 
+                    id="endDate"
+                    bind:value={endDate}
+                    min={startDate || undefined}
+                  />
+                </div>
+              </div>
+              
+              <button 
+                class="apply-filter-btn"
+                on:click={applyCustomDateFilter}
+                disabled={!startDate || !endDate}
+              >
+                Aplicar Filtro
+              </button>
+            </div>
+          {/if}
+        </div>
+        
+        <div class="period-modal-footer">
+          <button class="cancel-btn" on:click={() => showPeriodModal = false}>
+            Cancelar
+          </button>
+          {#if dateFilterMode === 'period'}
+            <button class="apply-btn" on:click={() => { showPeriodModal = false; if (activeReport === 'timeline') loadTimeline(); }}>
+              Aplicar
+            </button>
+          {/if}
+        </div>
+      </div>
+    </div>
+  {/if}
+  
+  <!-- Modal de Filtro de Período -->
+  {#if showPeriodModal}
+    <div class="period-modal-overlay" on:click={() => showPeriodModal = false} on:keydown={(e) => e.key === 'Escape' && (showPeriodModal = false)}>
+      <div class="period-modal" on:click|stopPropagation>
+        <div class="period-modal-header">
+          <h2>📅 Filtrar por Período</h2>
+          <button class="close-btn" on:click={() => showPeriodModal = false}>✕</button>
+        </div>
+        
+        <div class="period-modal-content">
+          <!-- Modo de Seleção -->
+          <div class="filter-mode-selector">
+            <button 
+              class="mode-btn"
+              class:active={dateFilterMode === 'period'}
+              on:click={() => dateFilterMode = 'period'}
+            >
+              Período Pré-definido
+            </button>
+            <button 
+              class="mode-btn"
+              class:active={dateFilterMode === 'custom'}
+              on:click={() => dateFilterMode = 'custom'}
+            >
+              Intervalo Personalizado
+            </button>
+          </div>
+          
+          {#if dateFilterMode === 'period'}
+            <!-- Seleção de Período Pré-definido -->
+            <div class="period-options-grid">
+              <button 
+                class="period-option-btn"
+                class:active={selectedPeriod === 'HORA'}
+                on:click={() => changePeriod('HORA')}
+              >
+                Hora
+              </button>
+              <button 
+                class="period-option-btn"
+                class:active={selectedPeriod === 'DIA'}
+                on:click={() => changePeriod('DIA')}
+              >
+                Dia
+              </button>
+              <button 
+                class="period-option-btn"
+                class:active={selectedPeriod === 'SEMANA'}
+                on:click={() => changePeriod('SEMANA')}
+              >
+                Semana
+              </button>
+              <button 
+                class="period-option-btn"
+                class:active={selectedPeriod === 'MÊS'}
+                on:click={() => changePeriod('MÊS')}
+              >
+                Mês
+              </button>
+              <button 
+                class="period-option-btn"
+                class:active={selectedPeriod === 'TRIMESTRE'}
+                on:click={() => changePeriod('TRIMESTRE')}
+              >
+                Trimestre
+              </button>
+              <button 
+                class="period-option-btn"
+                class:active={selectedPeriod === 'SEMESTRE'}
+                on:click={() => changePeriod('SEMESTRE')}
+              >
+                Semestre
+              </button>
+              <button 
+                class="period-option-btn"
+                class:active={selectedPeriod === 'ANUAL'}
+                on:click={() => changePeriod('ANUAL')}
+              >
+                Anual
+              </button>
+            </div>
+          {:else}
+            <!-- Intervalo Personalizado -->
+            <div class="custom-date-filter">
+              <div class="quick-periods">
+                <h3>Períodos Rápidos</h3>
+                <div class="quick-buttons">
+                  <button class="quick-btn" on:click={() => applyQuickPeriod('today')}>
+                    Hoje
+                  </button>
+                  <button class="quick-btn" on:click={() => applyQuickPeriod('yesterday')}>
+                    Ontem
+                  </button>
+                  <button class="quick-btn" on:click={() => applyQuickPeriod('lastWeek')}>
+                    Última Semana
+                  </button>
+                  <button class="quick-btn" on:click={() => applyQuickPeriod('lastMonth')}>
+                    Último Mês
+                  </button>
+                </div>
+              </div>
+              
+              <div class="date-inputs">
+                <div class="date-input-group">
+                  <label for="startDate">Data Inicial</label>
+                  <input 
+                    type="date" 
+                    id="startDate"
+                    bind:value={startDate}
+                    max={endDate || undefined}
+                  />
+                </div>
+                
+                <div class="date-input-group">
+                  <label for="endDate">Data Final</label>
+                  <input 
+                    type="date" 
+                    id="endDate"
+                    bind:value={endDate}
+                    min={startDate || undefined}
+                  />
+                </div>
+              </div>
+              
+              <button 
+                class="apply-filter-btn"
+                on:click={applyCustomDateFilter}
+                disabled={!startDate || !endDate}
+              >
+                Aplicar Filtro
+              </button>
+            </div>
+          {/if}
+        </div>
+        
+        <div class="period-modal-footer">
+          <button class="cancel-btn" on:click={() => showPeriodModal = false}>
+            Cancelar
+          </button>
+          {#if dateFilterMode === 'period'}
+            <button class="apply-btn" on:click={() => { showPeriodModal = false; if (activeReport === 'timeline') loadTimeline(); }}>
+              Aplicar
+            </button>
+          {/if}
+        </div>
+      </div>
     </div>
   {/if}
   
@@ -1513,5 +1838,275 @@
     border-radius: 8px;
     color: #059669;
     font-size: 0.875rem;
+  }
+
+  /* Botão de Filtro de Período */
+  .period-filter-container {
+    position: relative;
+    flex-shrink: 0;
+  }
+
+  .period-filter-btn {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.75rem 1.25rem;
+    background: linear-gradient(135deg, #7B68EE 0%, #6495ED 100%);
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 0.875rem;
+    font-weight: 500;
+    transition: all 0.2s;
+    box-shadow: 0 2px 4px rgba(123, 104, 238, 0.2);
+  }
+
+  .period-filter-btn:hover {
+    box-shadow: 0 4px 8px rgba(123, 104, 238, 0.3);
+    transform: translateY(-1px);
+  }
+
+  .filter-icon {
+    font-size: 0.875rem;
+  }
+
+  /* Modal de Filtro de Período */
+  .period-modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.5);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 10001;
+    backdrop-filter: blur(4px);
+  }
+
+  .period-modal {
+    background: #fff;
+    border-radius: 12px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+    width: 90%;
+    max-width: 700px;
+    max-height: 90vh;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .period-modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 1.5rem;
+    border-bottom: 2px solid #7B68EE;
+    background: linear-gradient(135deg, #7B68EE 0%, #6495ED 100%);
+    color: #fff;
+  }
+
+  .period-modal-header h2 {
+    margin: 0;
+    font-size: 1.25rem;
+    font-weight: 600;
+  }
+
+  .period-modal-content {
+    padding: 1.5rem;
+  }
+
+  .filter-mode-selector {
+    display: flex;
+    gap: 0.5rem;
+    margin-bottom: 1.5rem;
+    border-bottom: 2px solid #e5e7eb;
+    padding-bottom: 1rem;
+  }
+
+  .mode-btn {
+    flex: 1;
+    padding: 0.75rem 1rem;
+    background: #f3f4f6;
+    border: 2px solid transparent;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: #6b7280;
+    transition: all 0.2s;
+  }
+
+  .mode-btn:hover {
+    background: #e5e7eb;
+  }
+
+  .mode-btn.active {
+    background: linear-gradient(135deg, #7B68EE 0%, #6495ED 100%);
+    color: #fff;
+    border-color: #7B68EE;
+  }
+
+  .period-options-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 0.75rem;
+  }
+
+  .period-option-btn {
+    padding: 1rem;
+    background: #f9fafb;
+    border: 2px solid #e5e7eb;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: #374151;
+    transition: all 0.2s;
+    text-align: center;
+  }
+
+  .period-option-btn:hover {
+    background: #f3f4f6;
+    border-color: #7B68EE;
+    color: #7B68EE;
+  }
+
+  .period-option-btn.active {
+    background: linear-gradient(135deg, #7B68EE 0%, #6495ED 100%);
+    color: #fff;
+    border-color: #7B68EE;
+    box-shadow: 0 2px 4px rgba(123, 104, 238, 0.3);
+  }
+
+  .custom-date-filter {
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+  }
+
+  .quick-periods h3 {
+    margin: 0 0 0.75rem 0;
+    font-size: 1rem;
+    color: #374151;
+    font-weight: 600;
+  }
+
+  .quick-buttons {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 0.5rem;
+  }
+
+  .quick-btn {
+    padding: 0.75rem 1rem;
+    background: #f9fafb;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 0.875rem;
+    color: #374151;
+    transition: all 0.2s;
+  }
+
+  .quick-btn:hover {
+    background: #f3f4f6;
+    border-color: #7B68EE;
+    color: #7B68EE;
+  }
+
+  .date-inputs {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem;
+  }
+
+  .date-input-group {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  .date-input-group label {
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: #374151;
+  }
+
+  .date-input-group input[type="date"] {
+    padding: 0.75rem;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    font-size: 0.875rem;
+    color: #374151;
+    transition: all 0.2s;
+  }
+
+  .date-input-group input[type="date"]:focus {
+    outline: none;
+    border-color: #7B68EE;
+    box-shadow: 0 0 0 3px rgba(123, 104, 238, 0.1);
+  }
+
+  .apply-filter-btn {
+    padding: 0.75rem 1.5rem;
+    background: linear-gradient(135deg, #10B981 0%, #059669 100%);
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    font-weight: 500;
+    font-size: 0.875rem;
+    transition: all 0.2s;
+  }
+
+  .apply-filter-btn:hover:not(:disabled) {
+    box-shadow: 0 4px 8px rgba(16, 185, 129, 0.3);
+    transform: translateY(-1px);
+  }
+
+  .apply-filter-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .period-modal-footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.75rem;
+    padding: 1rem 1.5rem;
+    border-top: 1px solid #e5e7eb;
+    background: #f9fafb;
+  }
+
+  .cancel-btn, .apply-btn {
+    padding: 0.75rem 1.5rem;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    font-weight: 500;
+    font-size: 0.875rem;
+    transition: all 0.2s;
+  }
+
+  .cancel-btn {
+    background: #f3f4f6;
+    color: #374151;
+  }
+
+  .cancel-btn:hover {
+    background: #e5e7eb;
+  }
+
+  .apply-btn {
+    background: linear-gradient(135deg, #7B68EE 0%, #6495ED 100%);
+    color: #fff;
+  }
+
+  .apply-btn:hover {
+    box-shadow: 0 4px 8px rgba(123, 104, 238, 0.3);
+    transform: translateY(-1px);
   }
 </style>
