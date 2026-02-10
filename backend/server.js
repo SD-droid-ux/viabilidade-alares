@@ -8471,7 +8471,7 @@ app.post('/api/vi-ala/upload-base', upload.single('file'), async (req, res) => {
       });
     }
     
-    // Validar colunas esperadas
+    // Validar colunas esperadas (apenas verificar se existem, não se estão preenchidas)
     const expectedColumns = ['VI ALA', 'ALA', 'DATA', 'PROJETISTA', 'CIDADE', 'ENDEREÇO', 'LATITUDE', 'LONGITUDE', 'TABULAÇÃO FINAL'];
     const firstRow = data[0];
     const hasAllColumns = expectedColumns.every(col => firstRow.hasOwnProperty(col));
@@ -8484,6 +8484,17 @@ app.post('/api/vi-ala/upload-base', upload.single('file'), async (req, res) => {
       });
     }
     
+    // Normalizar dados: garantir que todos os campos existam, mesmo que vazios
+    const normalizedData = data.map(row => {
+      const normalized = {};
+      expectedColumns.forEach(col => {
+        // Aceitar valores vazios, null, undefined - converter tudo para string vazia se necessário
+        const value = row[col];
+        normalized[col] = (value === null || value === undefined || value === '') ? '' : String(value);
+      });
+      return normalized;
+    });
+    
     console.log(`📊 [Upload VI ALA] Processando ${data.length} registros...`);
     
     // Salvar dados no Supabase (se disponível) ou Excel (fallback)
@@ -8494,18 +8505,18 @@ app.post('/api/vi-ala/upload-base', upload.single('file'), async (req, res) => {
     if (supabase && isSupabaseAvailable()) {
       console.log('💾 [Upload VI ALA] Salvando no Supabase...');
       
-      // Limpar tabela antes de inserir novos dados (opcional - você pode querer fazer merge)
-      // Por enquanto, vamos inserir todos os registros
-      const recordsToInsert = data.map(row => ({
-        vi_ala: row['VI ALA'] || '',
-        ala: row['ALA'] || '',
-        data: row['DATA'] || '',
-        projetista: row['PROJETISTA'] || '',
-        cidade: row['CIDADE'] || '',
-        endereco: row['ENDEREÇO'] || '',
-        latitude: row['LATITUDE'] || '',
-        longitude: row['LONGITUDE'] || '',
-        tabulacao_final: row['TABULAÇÃO FINAL'] || ''
+      // Processar dados normalizados (aceita valores vazios)
+      // Usar os dados já normalizados que garantem que todos os campos existem
+      const recordsToInsert = normalizedData.map(row => ({
+        vi_ala: row['VI ALA'],
+        ala: row['ALA'],
+        data: row['DATA'],
+        projetista: row['PROJETISTA'],
+        cidade: row['CIDADE'],
+        endereco: row['ENDEREÇO'],
+        latitude: row['LATITUDE'],
+        longitude: row['LONGITUDE'],
+        tabulacao_final: row['TABULAÇÃO FINAL']
       }));
       
       // Inserir em lotes para evitar timeout
@@ -8526,21 +8537,8 @@ app.post('/api/vi-ala/upload-base', upload.single('file'), async (req, res) => {
       
       console.log(`✅ [Upload VI ALA] ${savedCount} registros salvos no Supabase`);
     } else {
-      // Fallback: salvar no Excel
+      // Fallback: salvar no Excel (usar dados já normalizados)
       console.log('💾 [Upload VI ALA] Salvando no Excel (fallback)...');
-      
-      // Normalizar dados para o formato esperado
-      const normalizedData = data.map(row => ({
-        'VI ALA': row['VI ALA'] || '',
-        'ALA': row['ALA'] || '',
-        'DATA': row['DATA'] || '',
-        'PROJETISTA': row['PROJETISTA'] || '',
-        'CIDADE': row['CIDADE'] || '',
-        'ENDEREÇO': row['ENDEREÇO'] || '',
-        'LATITUDE': row['LATITUDE'] || '',
-        'LONGITUDE': row['LONGITUDE'] || '',
-        'TABULAÇÃO FINAL': row['TABULAÇÃO FINAL'] || ''
-      }));
       
       // Salvar no Excel usando lock
       await withLock('vi_ala', async () => {
