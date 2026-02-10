@@ -215,8 +215,29 @@
   // Função para mudar período
   async function changePeriod(period) {
     selectedPeriod = period;
+    showPeriodDropdown = false; // Fechar dropdown após seleção
     if (activeReport === 'timeline') {
       await loadTimeline();
+    }
+  }
+  
+  // Função para obter o nome do período formatado
+  function getPeriodLabel(period) {
+    const labels = {
+      'DIA': 'Dia',
+      'SEMANA': 'Semana',
+      'MÊS': 'Mês',
+      'TRIMESTRE': 'Trimestre',
+      'SEMESTRE': 'Semestre',
+      'ANUAL': 'Anual'
+    };
+    return labels[period] || period;
+  }
+  
+  // Fechar dropdown ao clicar fora
+  function handleClickOutside(event) {
+    if (!event.target.closest('.period-dropdown-container')) {
+      showPeriodDropdown = false;
     }
   }
 
