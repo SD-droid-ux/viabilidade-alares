@@ -8175,11 +8175,14 @@ function getPeriodKey(date, period) {
   const year = date.getFullYear();
   const month = date.getMonth() + 1; // 1-12
   const day = date.getDate();
+  const hour = date.getHours(); // 0-23
   const week = getWeekNumber(date);
   const quarter = Math.floor((month - 1) / 3) + 1;
   const semester = month <= 6 ? 1 : 2;
   
   switch (period.toUpperCase()) {
+    case 'HORA':
+      return `${String(day).padStart(2, '0')}/${String(month).padStart(2, '0')}/${year} ${String(hour).padStart(2, '0')}:00`;
     case 'DIA':
       return `${String(day).padStart(2, '0')}/${String(month).padStart(2, '0')}/${year}`;
     case 'SEMANA':
@@ -8294,7 +8297,7 @@ app.get('/api/vi-ala/timeline', async (req, res) => {
     console.log(`📥 [API] Requisição recebida para timeline de VI ALAs (período: ${period})`);
     
     // Validar período
-    const validPeriods = ['DIA', 'SEMANA', 'MÊS', 'MES', 'TRIMESTRE', 'SEMESTRE', 'ANUAL', 'ANO'];
+    const validPeriods = ['HORA', 'DIA', 'SEMANA', 'MÊS', 'MES', 'TRIMESTRE', 'SEMESTRE', 'ANUAL', 'ANO'];
     if (!validPeriods.includes(period.toUpperCase())) {
       return res.status(400).json({
         success: false,
@@ -8371,6 +8374,14 @@ app.get('/api/vi-ala/timeline', async (req, res) => {
 function parsePeriodToDate(periodKey, periodType) {
   try {
     switch (periodType.toUpperCase()) {
+      case 'HORA':
+        // Formato: "DD/MM/YYYY HH:00"
+        const horaMatch = periodKey.match(/(\d{2})\/(\d{2})\/(\d{4}) (\d{2}):00/);
+        if (horaMatch) {
+          const [, day, month, year, hour] = horaMatch;
+          return new Date(parseInt(year, 10), parseInt(month, 10) - 1, parseInt(day, 10), parseInt(hour, 10));
+        }
+        return null;
       case 'DIA':
         // Formato: "DD/MM/YYYY"
         const [day, month, year] = periodKey.split('/');
