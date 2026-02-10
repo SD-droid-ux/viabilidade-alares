@@ -6198,6 +6198,8 @@
         };
         
         console.log('💾 [Frontend] Salvando registro VI ALA na base...', viAlaRecord);
+        console.log('💾 [Frontend] Tabulação Final sendo enviada:', viAlaRecord.tabulacaoFinal);
+        console.log('💾 [Frontend] Tipo da tabulação:', typeof viAlaRecord.tabulacaoFinal);
         
         // Salvar registro na base_VI_ALA (aguardar para garantir que seja salvo)
         try {
