@@ -4117,18 +4117,81 @@ async function readVIALABaseFromSupabase() {
     
     console.log('📂 [Supabase] Carregando VI ALAs do Supabase...');
     
-    const { data, error } = await supabase
+    // Primeiro, contar quantos registros existem
+    const { count, error: countError } = await supabase
       .from('vi_ala')
-      .select('vi_ala, ala, data, projetista, cidade, endereco, latitude, longitude, tabulacao_final, created_at')
-      .order('created_at', { ascending: false });
+      .select('*', { count: 'exact', head: true });
     
-    if (error) {
-      console.error('❌ [Supabase] Erro ao ler VI ALAs:', error);
+    if (countError) {
+      console.error('❌ [Supabase] Erro ao contar VI ALAs:', countError);
       return null; // Fallback para Excel
     }
     
+    console.log(`📊 [Supabase] Total de VI ALAs no banco: ${count || 0}`);
+    
+    if (!count || count === 0) {
+      console.log('⚠️ [Supabase] Nenhum VI ALA encontrado no Supabase (retornando array vazio)');
+      return []; // Retornar array vazio (não null) para indicar que Supabase está funcionando, mas vazio
+    }
+    
+    // Buscar TODOS os registros usando paginação
+    // Supabase tem limite de 1000 registros por query, então precisamos paginar
+    const BATCH_SIZE = 1000; // Tamanho do lote (máximo do Supabase)
+    let allData = [];
+    let offset = 0;
+    let hasMore = true;
+    let batchNumber = 0;
+    
+    console.log(`📥 [Supabase] Buscando ${count} VI ALAs em lotes de ${BATCH_SIZE}...`);
+    
+    while (hasMore) {
+      batchNumber++;
+      console.log(`📥 [Supabase] Buscando lote ${batchNumber} (offset: ${offset}, limite: ${BATCH_SIZE})...`);
+      
+      const { data, error } = await supabase
+        .from('vi_ala')
+        .select('vi_ala, ala, data, projetista, cidade, endereco, latitude, longitude, tabulacao_final, created_at')
+        .order('created_at', { ascending: false })
+        .range(offset, offset + BATCH_SIZE - 1); // range é inclusivo: [offset, offset + BATCH_SIZE - 1]
+      
+      if (error) {
+        console.error(`❌ [Supabase] Erro ao buscar lote ${batchNumber}:`, error);
+        console.error('❌ [Supabase] Código do erro:', error.code);
+        console.error('❌ [Supabase] Mensagem:', error.message);
+        // Se houver erro, retornar o que já foi carregado (se houver) ou null
+        if (allData.length > 0) {
+          console.warn(`⚠️ [Supabase] Erro ao buscar lote ${batchNumber}, retornando ${allData.length} VI ALAs já carregados`);
+          break; // Retornar dados parciais
+        }
+        return null; // Fallback para Excel
+      }
+      
+      if (!data || data.length === 0) {
+        hasMore = false;
+        break;
+      }
+      
+      allData = allData.concat(data);
+      console.log(`✅ [Supabase] Lote ${batchNumber} carregado: ${data.length} VI ALAs (total acumulado: ${allData.length})`);
+      
+      // Se retornou menos que o tamanho do lote, não há mais dados
+      if (data.length < BATCH_SIZE) {
+        hasMore = false;
+        break;
+      }
+      
+      offset += BATCH_SIZE;
+      
+      // Log de progresso a cada 10 lotes
+      if (batchNumber % 10 === 0) {
+        console.log(`📊 [Supabase] Progresso: ${allData.length} / ${count} VI ALAs carregados (${Math.round((allData.length / count) * 100)}%)`);
+      }
+    }
+    
+    console.log(`✅ [Supabase] ${allData.length} VI ALAs carregados do Supabase (de ${count} total)`);
+    
     // Converter para formato compatível com Excel (mesma estrutura)
-    const records = (data || []).map(row => {
+    const records = allData.map(row => {
       // Usar created_at se disponível (tem timestamp completo), senão usar data
       let dataFormatada = '';
       if (row.created_at) {
