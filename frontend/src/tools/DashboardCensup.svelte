@@ -184,14 +184,21 @@
 
   // Função para carregar timeline
   async function loadTimeline() {
+    // Se não houver data selecionada, não fazer nada (não mostrar erro)
+    if (!selectedStartDate) {
+      timelineData = {
+        timeline: [],
+        total: 0,
+        period: 'DIA'
+      };
+      error = null;
+      return;
+    }
+    
     loadingTimeline = true;
     error = null;
     
     try {
-      if (!selectedStartDate) {
-        throw new Error('Por favor, selecione uma data');
-      }
-      
       // Determinar período baseado na seleção
       let period = 'DIA'; // Padrão: agrupar por dia
       
