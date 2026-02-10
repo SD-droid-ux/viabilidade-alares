@@ -4463,7 +4463,8 @@ async function saveVIALARecordToSupabase(record) {
     }
     
     console.log('💾 [Supabase] Salvando registro VI ALA no Supabase...');
-    console.log('💾 [Supabase] Dados recebidos:', record);
+    console.log('💾 [Supabase] Dados recebidos:', JSON.stringify(record, null, 2));
+    console.log('💾 [Supabase] Tabulação Final recebida:', record['TABULAÇÃO FINAL']);
     
     // Converter data do formato "DD/MM/YYYY HH:MM" para "YYYY-MM-DD" (formato PostgreSQL DATE)
     let dataConvertida = null;
@@ -4499,6 +4500,10 @@ async function saveVIALARecordToSupabase(record) {
     }
     
     // Converter formato Excel para formato Supabase
+    const tabulacaoFinalValue = record['TABULAÇÃO FINAL'];
+    console.log('💾 [Supabase] Tabulação Final antes de salvar:', tabulacaoFinalValue);
+    console.log('💾 [Supabase] Tipo da tabulação:', typeof tabulacaoFinalValue);
+    
     const dataToSave = {
       vi_ala: record['VI ALA'] || '',
       ala: record['ALA'] || null,
@@ -4508,7 +4513,7 @@ async function saveVIALARecordToSupabase(record) {
       endereco: record['ENDEREÇO'] || null,
       latitude: record['LATITUDE'] ? parseFloat(record['LATITUDE']) : null,
       longitude: record['LONGITUDE'] ? parseFloat(record['LONGITUDE']) : null,
-      tabulacao_final: record['TABULAÇÃO FINAL'] || null
+      tabulacao_final: (tabulacaoFinalValue && tabulacaoFinalValue.trim() !== '') ? tabulacaoFinalValue.trim() : null
     };
     
     // Validar campos obrigatórios
@@ -4516,19 +4521,27 @@ async function saveVIALARecordToSupabase(record) {
       throw new Error('VI ALA é obrigatório');
     }
     
-    console.log('💾 [Supabase] Dados formatados para salvar:', dataToSave);
+    console.log('💾 [Supabase] Dados formatados para salvar:', JSON.stringify(dataToSave, null, 2));
+    console.log('💾 [Supabase] Tabulação Final que será salva:', dataToSave.tabulacao_final);
     
     // Inserir no Supabase
-    const { error } = await supabase
+    console.log('💾 [Supabase] Inserindo no Supabase com tabulação_final:', dataToSave.tabulacao_final);
+    const { data: insertedData, error } = await supabase
       .from('vi_ala')
-      .insert([dataToSave]);
+      .insert([dataToSave])
+      .select();
     
     if (error) {
       console.error('❌ [Supabase] Erro ao inserir VI ALA:', error);
+      console.error('❌ [Supabase] Detalhes do erro:', JSON.stringify(error, null, 2));
       return false;
     }
     
     console.log(`✅ [Supabase] Registro VI ALA salvo: ${dataToSave.vi_ala}`);
+    if (insertedData && insertedData.length > 0) {
+      console.log('✅ [Supabase] Dados inseridos retornados:', JSON.stringify(insertedData, null, 2));
+      console.log('✅ [Supabase] Tabulação Final salva:', insertedData[0].tabulacao_final);
+    }
     return true; // Sucesso
   } catch (err) {
     console.error('❌ [Supabase] Erro ao salvar registro VI ALA:', err);
@@ -8027,9 +8040,12 @@ app.post('/api/vi-ala/save', async (req, res) => {
     res.setHeader('Access-Control-Allow-Credentials', 'true');
     
     console.log('📥 [API] Requisição recebida para salvar VI ALA');
-    console.log('📦 [API] Body recebido do frontend:', req.body);
+    console.log('📦 [API] Body recebido do frontend:', JSON.stringify(req.body, null, 2));
     
     const { viAla, ala, data, projetista, cidade, endereco, latitude, longitude, tabulacaoFinal } = req.body;
+    
+    console.log('📋 [API] Tabulação Final recebida:', tabulacaoFinal);
+    console.log('📋 [API] Tipo da tabulação:', typeof tabulacaoFinal);
     
     if (!viAla || viAla.trim() === '') {
       console.warn('⚠️ [API] VI ALA não fornecido ou vazio');
@@ -8049,7 +8065,8 @@ app.post('/api/vi-ala/save', async (req, res) => {
       'TABULAÇÃO FINAL': tabulacaoFinal || ''
     };
     
-    console.log('💾 [API] Salvando registro:', record);
+    console.log('💾 [API] Salvando registro:', JSON.stringify(record, null, 2));
+    console.log('💾 [API] Tabulação Final no record:', record['TABULAÇÃO FINAL']);
     
     // Salvar (tenta Supabase primeiro, fallback Excel)
     await saveVIALARecord(record);
