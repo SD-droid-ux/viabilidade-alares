@@ -4083,7 +4083,8 @@ async function _ensureVIALABaseInternal() {
         'ENDEREÇO',
         'LATITUDE',
         'LONGITUDE',
-        'TABULAÇÃO FINAL'
+        'TABULAÇÃO FINAL',
+        'HORA'
       ];
       
       const worksheet = XLSX.utils.aoa_to_sheet([headers]);
@@ -4150,7 +4151,7 @@ async function readVIALABaseFromSupabase() {
       
       const { data, error } = await supabase
         .from('vi_ala')
-        .select('vi_ala, ala, data, projetista, cidade, endereco, latitude, longitude, tabulacao_final, created_at')
+        .select('vi_ala, ala, data, hora, projetista, cidade, endereco, latitude, longitude, tabulacao_final, created_at')
         .order('created_at', { ascending: false })
         .range(offset, offset + BATCH_SIZE - 1); // range é inclusivo: [offset, offset + BATCH_SIZE - 1]
       
@@ -4240,7 +4241,8 @@ async function readVIALABaseFromSupabase() {
         'ENDEREÇO': row.endereco || '',
         'LATITUDE': row.latitude || '',
         'LONGITUDE': row.longitude || '',
-        'TABULAÇÃO FINAL': row.tabulacao_final || ''
+        'TABULAÇÃO FINAL': row.tabulacao_final || '',
+      'HORA': row.hora || ''
       };
     });
     
@@ -4501,13 +4503,16 @@ async function saveVIALARecordToSupabase(record) {
     
     // Converter formato Excel para formato Supabase
     const tabulacaoFinalValue = record['TABULAÇÃO FINAL'];
+    const horaValue = record['HORA'];
     console.log('💾 [Supabase] Tabulação Final antes de salvar:', tabulacaoFinalValue);
     console.log('💾 [Supabase] Tipo da tabulação:', typeof tabulacaoFinalValue);
+    console.log('💾 [Supabase] Hora antes de salvar:', horaValue);
     
     const dataToSave = {
       vi_ala: record['VI ALA'] || '',
       ala: record['ALA'] || null,
       data: dataConvertida, // Data convertida para formato PostgreSQL
+      hora: (horaValue && horaValue.trim() !== '') ? horaValue.trim() : null, // Nova coluna: hora no formato "20:30h"
       projetista: record['PROJETISTA'] || null,
       cidade: record['CIDADE'] || null,
       endereco: record['ENDEREÇO'] || null,
@@ -8042,10 +8047,11 @@ app.post('/api/vi-ala/save', async (req, res) => {
     console.log('📥 [API] Requisição recebida para salvar VI ALA');
     console.log('📦 [API] Body recebido do frontend:', JSON.stringify(req.body, null, 2));
     
-    const { viAla, ala, data, projetista, cidade, endereco, latitude, longitude, tabulacaoFinal } = req.body;
+    const { viAla, ala, data, hora, projetista, cidade, endereco, latitude, longitude, tabulacaoFinal } = req.body;
     
     console.log('📋 [API] Tabulação Final recebida:', tabulacaoFinal);
     console.log('📋 [API] Tipo da tabulação:', typeof tabulacaoFinal);
+    console.log('📋 [API] Hora recebida:', hora);
     
     if (!viAla || viAla.trim() === '') {
       console.warn('⚠️ [API] VI ALA não fornecido ou vazio');
@@ -8057,6 +8063,7 @@ app.post('/api/vi-ala/save', async (req, res) => {
       'VI ALA': viAla.trim(),
       'ALA': ala || '',
       'DATA': data || '',
+      'HORA': hora || '', // Nova coluna: hora separada
       'PROJETISTA': projetista || '',
       'CIDADE': cidade || '',
       'ENDEREÇO': endereco || '',
@@ -8125,7 +8132,8 @@ app.get('/api/vi-ala/list', async (req, res) => {
         data_geracao: row['DATA'] || '',
         latitude: row['LATITUDE'] || '',
         longitude: row['LONGITUDE'] || '',
-        tabulacao_final: row['TABULAÇÃO FINAL'] || ''
+        tabulacao_final: row['TABULAÇÃO FINAL'] || '',
+        hora: row['HORA'] || ''
       };
     });
     
@@ -8594,11 +8602,14 @@ app.post('/api/vi-ala/upload-base', upload.single('file'), async (req, res) => {
     }
     
     // Validar colunas esperadas (verificar no cabeçalho, não nos dados)
-    const expectedColumns = ['VI ALA', 'ALA', 'DATA', 'PROJETISTA', 'CIDADE', 'ENDEREÇO', 'LATITUDE', 'LONGITUDE', 'TABULAÇÃO FINAL'];
-    const hasAllColumns = expectedColumns.every(col => headers.includes(col));
+    // HORA é opcional (para compatibilidade com arquivos antigos)
+    const requiredColumns = ['VI ALA', 'ALA', 'DATA', 'PROJETISTA', 'CIDADE', 'ENDEREÇO', 'LATITUDE', 'LONGITUDE', 'TABULAÇÃO FINAL'];
+    const expectedColumns = [...requiredColumns, 'HORA'];
+    // Verificar apenas colunas obrigatórias (HORA é opcional)
+    const hasAllRequiredColumns = requiredColumns.every(col => headers.includes(col));
     
-    if (!hasAllColumns) {
-      const missingColumns = expectedColumns.filter(col => !headers.includes(col));
+    if (!hasAllRequiredColumns) {
+      const missingColumns = requiredColumns.filter(col => !headers.includes(col));
       return res.status(400).json({
         success: false,
         error: `O arquivo não contém todas as colunas necessárias. Colunas faltando: ${missingColumns.join(', ')}`
@@ -8614,6 +8625,11 @@ app.post('/api/vi-ala/upload-base', upload.single('file'), async (req, res) => {
         const value = row[col];
         normalized[col] = (value === null || value === undefined || value === '') ? '' : String(value);
       });
+      
+      // Se HORA não existir no arquivo (compatibilidade com arquivos antigos), deixar vazio
+      if (!normalized['HORA']) {
+        normalized['HORA'] = '';
+      }
       
       // Se VI ALA estiver vazio mas ALA tiver valor, usar ALA como VI ALA
       if (!normalized['VI ALA'] || normalized['VI ALA'].trim() === '') {
@@ -8641,6 +8657,7 @@ app.post('/api/vi-ala/upload-base', upload.single('file'), async (req, res) => {
         vi_ala: row['VI ALA'],
         ala: row['ALA'],
         data: row['DATA'],
+        hora: row['HORA'] || null,
         projetista: row['PROJETISTA'],
         cidade: row['CIDADE'],
         endereco: row['ENDEREÇO'],
