@@ -8457,7 +8457,23 @@ app.post('/api/vi-ala/upload-base', upload.single('file'), async (req, res) => {
     const workbook = XLSX.read(fileBuffer, { type: 'buffer' });
     const sheetName = workbook.SheetNames[0];
     const worksheet = workbook.Sheets[sheetName];
-    const data = XLSX.utils.sheet_to_json(worksheet);
+    
+    // Ler cabeçalho diretamente da planilha para garantir que detectamos todas as colunas
+    // Usar range para pegar a primeira linha completa
+    const range = XLSX.utils.decode_range(worksheet['!ref'] || 'A1');
+    const headerRow = [];
+    for (let col = range.s.c; col <= range.e.c; col++) {
+      const cellAddress = XLSX.utils.encode_cell({ r: 0, c: col });
+      const cell = worksheet[cellAddress];
+      const headerValue = cell ? String(cell.v || '').trim() : '';
+      if (headerValue) {
+        headerRow.push(headerValue);
+      }
+    }
+    const headers = headerRow;
+    
+    // Ler dados (usar defval para garantir que células vazias sejam tratadas)
+    const data = XLSX.utils.sheet_to_json(worksheet, { defval: '' });
     
     // Limpar arquivo temporário
     if (fs.existsSync(req.file.path)) {
@@ -8471,13 +8487,12 @@ app.post('/api/vi-ala/upload-base', upload.single('file'), async (req, res) => {
       });
     }
     
-    // Validar colunas esperadas (apenas verificar se existem, não se estão preenchidas)
+    // Validar colunas esperadas (verificar no cabeçalho, não nos dados)
     const expectedColumns = ['VI ALA', 'ALA', 'DATA', 'PROJETISTA', 'CIDADE', 'ENDEREÇO', 'LATITUDE', 'LONGITUDE', 'TABULAÇÃO FINAL'];
-    const firstRow = data[0];
-    const hasAllColumns = expectedColumns.every(col => firstRow.hasOwnProperty(col));
+    const hasAllColumns = expectedColumns.every(col => headers.includes(col));
     
     if (!hasAllColumns) {
-      const missingColumns = expectedColumns.filter(col => !firstRow.hasOwnProperty(col));
+      const missingColumns = expectedColumns.filter(col => !headers.includes(col));
       return res.status(400).json({
         success: false,
         error: `O arquivo não contém todas as colunas necessárias. Colunas faltando: ${missingColumns.join(', ')}`
@@ -8485,6 +8500,7 @@ app.post('/api/vi-ala/upload-base', upload.single('file'), async (req, res) => {
     }
     
     // Normalizar dados: garantir que todos os campos existam, mesmo que vazios
+    // Se VI ALA estiver vazio, usar ALA como identificação padrão
     const normalizedData = data.map(row => {
       const normalized = {};
       expectedColumns.forEach(col => {
@@ -8492,6 +8508,14 @@ app.post('/api/vi-ala/upload-base', upload.single('file'), async (req, res) => {
         const value = row[col];
         normalized[col] = (value === null || value === undefined || value === '') ? '' : String(value);
       });
+      
+      // Se VI ALA estiver vazio mas ALA tiver valor, usar ALA como VI ALA
+      if (!normalized['VI ALA'] || normalized['VI ALA'].trim() === '') {
+        if (normalized['ALA'] && normalized['ALA'].trim() !== '') {
+          normalized['VI ALA'] = normalized['ALA'];
+        }
+      }
+      
       return normalized;
     });
     
