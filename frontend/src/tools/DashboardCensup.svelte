@@ -224,6 +224,7 @@
   // Função para obter o nome do período formatado
   function getPeriodLabel(period) {
     const labels = {
+      'HORA': 'Hora',
       'DIA': 'Dia',
       'SEMANA': 'Semana',
       'MÊS': 'Mês',
@@ -588,6 +589,13 @@
                   </button>
                   {#if showPeriodDropdown}
                     <div class="period-dropdown-menu">
+                      <button 
+                        class="period-option"
+                        class:active={selectedPeriod === 'HORA'}
+                        on:click={() => changePeriod('HORA')}
+                      >
+                        Hora
+                      </button>
                       <button 
                         class="period-option"
                         class:active={selectedPeriod === 'DIA'}
