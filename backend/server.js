@@ -8312,6 +8312,10 @@ app.get('/api/vi-ala/timeline', async (req, res) => {
     const data = await _readVIALABaseInternal();
     console.log(`📊 [API] Total de registros na base: ${data.length}`);
     
+    // Obter filtros de data (opcional)
+    const startDateFilter = req.query.startDate;
+    const endDateFilter = req.query.endDate;
+    
     // Agrupar por período
     const timelineByPeriod = {};
     
@@ -8321,6 +8325,17 @@ app.get('/api/vi-ala/timeline', async (req, res) => {
       
       const date = parseDateFromString(dateStr);
       if (!date) continue;
+      
+      // Aplicar filtros de data se fornecidos
+      if (startDateFilter) {
+        const startDate = new Date(startDateFilter + 'T00:00:00');
+        if (date < startDate) continue;
+      }
+      
+      if (endDateFilter) {
+        const endDate = new Date(endDateFilter + 'T23:59:59');
+        if (date > endDate) continue;
+      }
       
       const periodKey = getPeriodKey(date, period);
       if (!periodKey) continue;
