@@ -424,6 +424,15 @@
   // Função para mudar relatório ativo
   async function changeReport(report) {
     activeReport = report;
+    
+    // Se for Evolução Temporal e não houver data selecionada, selecionar o dia atual
+    if (report === 'timeline' && !selectedStartDate) {
+      const today = new Date().toISOString().split('T')[0];
+      selectedStartDate = today;
+      selectedEndDate = null;
+      dateFilterMode = 'single';
+    }
+    
     await refreshActiveReport();
   }
 
@@ -442,6 +451,15 @@
       
       // Carregar dados iniciais
       await loadStats();
+      
+      // Se o relatório ativo for timeline, definir data atual automaticamente
+      if (activeReport === 'timeline' && !selectedStartDate) {
+        const today = new Date().toISOString().split('T')[0];
+        selectedStartDate = today;
+        selectedEndDate = null;
+        dateFilterMode = 'single';
+      }
+      
       await loadTimeline();
       
       // Configurar atualização automática
