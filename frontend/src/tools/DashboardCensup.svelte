@@ -812,7 +812,15 @@
               <div class="timeline-container">
                 <!-- Gráfico de Linha -->
                 <div class="chart-container">
-                  <h2>Evolução por {selectedPeriod}</h2>
+                  <h2>
+                    {#if selectedStartDate && (!selectedEndDate || selectedStartDate === selectedEndDate)}
+                      Evolução por Hora - {new Date(selectedStartDate).toLocaleDateString('pt-BR')}
+                    {:else if selectedStartDate && selectedEndDate}
+                      Evolução por Dia - {new Date(selectedStartDate).toLocaleDateString('pt-BR')} a {new Date(selectedEndDate).toLocaleDateString('pt-BR')}
+                    {:else}
+                      Evolução Temporal
+                    {/if}
+                  </h2>
                   <div class="line-chart-wrapper">
                     <svg class="line-chart" viewBox="0 0 800 400">
                       {#each lineChartData as item}
