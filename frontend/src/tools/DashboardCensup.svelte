@@ -827,15 +827,6 @@
                   <h1>Evolução Temporal</h1>
                   <p class="subtitle">Quantidade de VI ALAs gerados ao longo do tempo</p>
                 </div>
-                <div class="period-filter-container">
-                  <button 
-                    class="period-filter-btn"
-                    on:click={() => showPeriodModal = true}
-                  >
-                    <span>📅 {formatDateRange()}</span>
-                    <span class="filter-icon">📅</span>
-                  </button>
-                </div>
               </div>
             </div>
 
@@ -855,15 +846,26 @@
               <div class="timeline-container">
                 <!-- Gráfico de Linha -->
                 <div class="chart-container">
-                  <h2>
-                    {#if selectedStartDate && (!selectedEndDate || selectedStartDate === selectedEndDate)}
-                      Evolução por Hora - {formatDateString(selectedStartDate)}
-                    {:else if selectedStartDate && selectedEndDate}
-                      Evolução por Dia - {formatDateString(selectedStartDate)} a {formatDateString(selectedEndDate)}
-                    {:else}
-                      Evolução Temporal
-                    {/if}
-                  </h2>
+                  <div class="chart-header">
+                    <h2>
+                      {#if selectedStartDate && (!selectedEndDate || selectedStartDate === selectedEndDate)}
+                        Evolução por Hora - {formatDateString(selectedStartDate)}
+                      {:else if selectedStartDate && selectedEndDate}
+                        Evolução por Dia - {formatDateString(selectedStartDate)} a {formatDateString(selectedEndDate)}
+                      {:else}
+                        Evolução Temporal
+                      {/if}
+                    </h2>
+                    <div class="period-filter-container">
+                      <button 
+                        class="period-filter-btn"
+                        on:click={() => showPeriodModal = true}
+                      >
+                        <span>📅 {formatDateRange()}</span>
+                        <span class="filter-icon">📅</span>
+                      </button>
+                    </div>
+                  </div>
                   <div class="line-chart-wrapper">
                     <svg class="line-chart" viewBox="0 0 800 400">
                       {#each lineChartData as item}
@@ -1439,13 +1441,20 @@
     border: 1px solid rgba(123, 104, 238, 0.2);
   }
 
+  .chart-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1.5rem;
+    padding-bottom: 0.75rem;
+    border-bottom: 2px solid #7B68EE;
+  }
+
   .chart-container h2 {
-    margin: 0 0 1.5rem 0;
+    margin: 0;
     font-size: 1.25rem;
     color: #4c1d95;
     font-weight: 600;
-    border-bottom: 2px solid #7B68EE;
-    padding-bottom: 0.75rem;
   }
 
   .pie-chart-wrapper {
