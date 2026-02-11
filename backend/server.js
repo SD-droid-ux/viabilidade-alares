@@ -4225,7 +4225,14 @@ async function readVIALABaseFromSupabase() {
           // Formato YYYY-MM-DD, converter para DD/MM/YYYY
           const partes = dataStr.split(' ')[0].split('-');
           if (partes.length === 3) {
-            dataFormatada = `${partes[2]}/${partes[1]}/${partes[0]}`;
+            // Combinar data com hora se houver
+            if (row.hora && row.hora.trim() !== '') {
+              // Remover 'h' do final se houver (ex: "20:30h" -> "20:30")
+              const horaFormatada = row.hora.replace(/h$/, '');
+              dataFormatada = `${partes[2]}/${partes[1]}/${partes[0]} ${horaFormatada}`;
+            } else {
+              dataFormatada = `${partes[2]}/${partes[1]}/${partes[0]}`;
+            }
           }
         } else {
           dataFormatada = dataStr;
@@ -8223,7 +8230,8 @@ function getPeriodKey(date, period) {
   
   switch (period.toUpperCase()) {
     case 'HORA':
-      return `${String(day).padStart(2, '0')}/${String(month).padStart(2, '0')}/${year} ${String(hour).padStart(2, '0')}:00`;
+      const minute = date.getMinutes(); // Incluir minutos
+      return `${String(day).padStart(2, '0')}/${String(month).padStart(2, '0')}/${year} ${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
     case 'DIA':
       return `${String(day).padStart(2, '0')}/${String(month).padStart(2, '0')}/${year}`;
     case 'SEMANA':
@@ -8455,11 +8463,11 @@ function parsePeriodToDate(periodKey, periodType) {
   try {
     switch (periodType.toUpperCase()) {
       case 'HORA':
-        // Formato: "DD/MM/YYYY HH:00"
-        const horaMatch = periodKey.match(/(\d{2})\/(\d{2})\/(\d{4}) (\d{2}):00/);
+        // Formato: "DD/MM/YYYY HH:MM"
+        const horaMatch = periodKey.match(/(\d{2})\/(\d{2})\/(\d{4}) (\d{2}):(\d{2})/);
         if (horaMatch) {
-          const [, day, month, year, hour] = horaMatch;
-          return new Date(parseInt(year, 10), parseInt(month, 10) - 1, parseInt(day, 10), parseInt(hour, 10));
+          const [, day, month, year, hour, minute] = horaMatch;
+          return new Date(parseInt(year, 10), parseInt(month, 10) - 1, parseInt(day, 10), parseInt(hour, 10), parseInt(minute, 10));
         }
         return null;
       case 'DIA':
