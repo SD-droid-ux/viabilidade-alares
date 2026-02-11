@@ -244,8 +244,12 @@
     } else if (activeReport === 'timeline') {
       // Se não houver data selecionada, definir o dia atual
       if (!selectedStartDate) {
-        const today = new Date().toISOString().split('T')[0];
-        selectedStartDate = today;
+        // Usar data local ao invés de UTC para evitar problemas de timezone
+        const now = new Date();
+        const year = now.getFullYear();
+        const month = String(now.getMonth() + 1).padStart(2, '0');
+        const day = String(now.getDate()).padStart(2, '0');
+        selectedStartDate = `${year}-${month}-${day}`;
         selectedEndDate = null;
         dateFilterMode = 'single';
       }
@@ -435,8 +439,12 @@
     // Se for Evolução Temporal, sempre definir o dia atual se não houver data selecionada
     if (report === 'timeline') {
       if (!selectedStartDate) {
-        const today = new Date().toISOString().split('T')[0];
-        selectedStartDate = today;
+        // Usar data local ao invés de UTC para evitar problemas de timezone
+        const now = new Date();
+        const year = now.getFullYear();
+        const month = String(now.getMonth() + 1).padStart(2, '0');
+        const day = String(now.getDate()).padStart(2, '0');
+        selectedStartDate = `${year}-${month}-${day}`;
         selectedEndDate = null;
         dateFilterMode = 'single';
       }
@@ -467,8 +475,12 @@
       // Se o relatório ativo for timeline, definir data atual automaticamente
       if (activeReport === 'timeline') {
         if (!selectedStartDate) {
-          const today = new Date().toISOString().split('T')[0];
-          selectedStartDate = today;
+          // Usar data local ao invés de UTC para evitar problemas de timezone
+          const now = new Date();
+          const year = now.getFullYear();
+          const month = String(now.getMonth() + 1).padStart(2, '0');
+          const day = String(now.getDate()).padStart(2, '0');
+          selectedStartDate = `${year}-${month}-${day}`;
           selectedEndDate = null;
           dateFilterMode = 'single';
         }
@@ -616,7 +628,29 @@
     // Labels do eixo X
     const labels = data.map((point, i) => {
       const x = padding + (chartWidth / (data.length - 1 || 1)) * i;
-      return { x, y: 400 - padding + 20, text: point.period };
+      const y = 400 - padding + 20;
+      
+      // Se o período for HORA, mostrar apenas a hora (ex: "20:30h")
+      let labelText = point.period;
+      if (timelineData.period === 'HORA' && point.period) {
+        // Formato esperado: "DD/MM/YYYY HH:MM" ou "DD/MM/YYYY HH:00"
+        const horaMatch = point.period.match(/(\d{2}):(\d{2})/);
+        if (horaMatch) {
+          const [, hour, minute] = horaMatch;
+          labelText = `${hour}:${minute}h`;
+        } else {
+          // Tentar formato alternativo
+          const parts = point.period.split(' ');
+          if (parts.length > 1) {
+            const timePart = parts[1];
+            if (timePart.includes(':')) {
+              labelText = timePart + 'h';
+            }
+          }
+        }
+      }
+      
+      return { x, y, text: labelText };
     });
     result.push({ type: 'labels', labels: labels });
 
@@ -901,7 +935,19 @@
                     <tbody>
                       {#each timelineData.timeline as point}
                         <tr>
-                          <td>{point.period}</td>
+                          <td>
+                            {#if timelineData.period === 'HORA' && point.period}
+                              {@const horaMatch = point.period.match(/(\d{2}):(\d{2})/)}
+                              {#if horaMatch}
+                                {@const [, hour, minute] = horaMatch}
+                                {hour}:{minute}h
+                              {:else}
+                                {point.period}
+                              {/if}
+                            {:else}
+                              {point.period}
+                            {/if}
+                          </td>
                           <td class="count-cell">{point.count}</td>
                         </tr>
                       {/each}
