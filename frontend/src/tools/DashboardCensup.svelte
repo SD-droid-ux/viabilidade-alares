@@ -241,7 +241,14 @@
   async function refreshActiveReport() {
     if (activeReport === 'stats') {
       await loadStats();
-    } else {
+    } else if (activeReport === 'timeline') {
+      // Se não houver data selecionada, definir o dia atual
+      if (!selectedStartDate) {
+        const today = new Date().toISOString().split('T')[0];
+        selectedStartDate = today;
+        selectedEndDate = null;
+        dateFilterMode = 'single';
+      }
       await loadTimeline();
     }
   }
@@ -425,15 +432,19 @@
   async function changeReport(report) {
     activeReport = report;
     
-    // Se for Evolução Temporal e não houver data selecionada, selecionar o dia atual
-    if (report === 'timeline' && !selectedStartDate) {
-      const today = new Date().toISOString().split('T')[0];
-      selectedStartDate = today;
-      selectedEndDate = null;
-      dateFilterMode = 'single';
+    // Se for Evolução Temporal, sempre definir o dia atual se não houver data selecionada
+    if (report === 'timeline') {
+      if (!selectedStartDate) {
+        const today = new Date().toISOString().split('T')[0];
+        selectedStartDate = today;
+        selectedEndDate = null;
+        dateFilterMode = 'single';
+      }
+      // Carregar timeline imediatamente após definir a data
+      await loadTimeline();
+    } else {
+      await refreshActiveReport();
     }
-    
-    await refreshActiveReport();
   }
 
   // Inicializar ferramenta quando o componente é montado
@@ -452,15 +463,17 @@
       // Carregar dados iniciais
       await loadStats();
       
+      // Sempre carregar timeline (mesmo que não seja o relatório ativo inicialmente)
       // Se o relatório ativo for timeline, definir data atual automaticamente
-      if (activeReport === 'timeline' && !selectedStartDate) {
-        const today = new Date().toISOString().split('T')[0];
-        selectedStartDate = today;
-        selectedEndDate = null;
-        dateFilterMode = 'single';
+      if (activeReport === 'timeline') {
+        if (!selectedStartDate) {
+          const today = new Date().toISOString().split('T')[0];
+          selectedStartDate = today;
+          selectedEndDate = null;
+          dateFilterMode = 'single';
+        }
+        await loadTimeline();
       }
-      
-      await loadTimeline();
       
       // Configurar atualização automática
       refreshInterval = setInterval(() => {
