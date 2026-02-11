@@ -8153,15 +8153,31 @@ app.get('/api/vi-ala/list', async (req, res) => {
   }
 });
 
-// Função auxiliar para parsear data do formato "DD/MM/YYYY HH:MM" ou "DD/MM/YYYY"
+// Função auxiliar para parsear data do formato "DD/MM/YYYY HH:MM" ou "DD/MM/YYYY" ou "YYYY-MM-DD"
 function parseDateFromString(dateStr) {
   if (!dateStr || typeof dateStr !== 'string') {
     return null;
   }
   
   try {
+    const trimmed = dateStr.trim();
+    
+    // Tentar formato PostgreSQL DATE primeiro (YYYY-MM-DD) - formato do Supabase
+    if (trimmed.match(/^\d{4}-\d{2}-\d{2}/)) {
+      const dateOnly = trimmed.split(' ')[0]; // Pega só a data, ignora hora se houver
+      const [year, month, day] = dateOnly.split('-');
+      const date = new Date(
+        parseInt(year, 10),
+        parseInt(month, 10) - 1,
+        parseInt(day, 10)
+      );
+      if (!isNaN(date.getTime())) {
+        return date;
+      }
+    }
+    
     // Formato: "DD/MM/YYYY HH:MM" ou "DD/MM/YYYY"
-    const parts = dateStr.trim().split(' ');
+    const parts = trimmed.split(' ');
     const datePart = parts[0]; // "DD/MM/YYYY"
     const timePart = parts[1] || '00:00'; // "HH:MM" ou "00:00"
     
@@ -8344,23 +8360,47 @@ app.get('/api/vi-ala/timeline', async (req, res) => {
     // Agrupar por período
     const timelineByPeriod = {};
     
+    console.log(`📊 [API] Filtros de data: startDate=${startDateFilter || 'N/A'}, endDate=${endDateFilter || 'N/A'}`);
+    
     for (const row of data) {
       const dateStr = row['DATA'] || '';
-      if (!dateStr) continue;
+      if (!dateStr) {
+        console.log('⚠️ [API] Registro sem data:', row['VI ALA']);
+        continue;
+      }
+      
+      console.log(`📅 [API] Processando registro ${row['VI ALA']} com data: "${dateStr}"`);
       
       const date = parseDateFromString(dateStr);
-      if (!date) continue;
+      if (!date) {
+        console.warn(`⚠️ [API] Não foi possível parsear data: "${dateStr}" do registro ${row['VI ALA']}`);
+        continue;
+      }
       
       // Aplicar filtros de data se fornecidos
       if (startDateFilter) {
         const startDate = new Date(startDateFilter + 'T00:00:00');
-        if (date < startDate) continue;
+        // Comparar apenas dia, mês e ano (ignorar hora)
+        const dateOnly = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+        const startDateOnly = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate());
+        if (dateOnly < startDateOnly) {
+          console.log(`⏭️ [API] Registro ${row['VI ALA']} antes da data inicial: ${dateOnly.toISOString().split('T')[0]} < ${startDateOnly.toISOString().split('T')[0]}`);
+          continue;
+        }
       }
       
       if (endDateFilter) {
         const endDate = new Date(endDateFilter + 'T23:59:59');
-        if (date > endDate) continue;
+        // Comparar apenas dia, mês e ano (ignorar hora)
+        const dateOnly = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+        const endDateOnly = new Date(endDate.getFullYear(), endDate.getMonth(), endDate.getDate());
+        if (dateOnly > endDateOnly) {
+          console.log(`⏭️ [API] Registro ${row['VI ALA']} depois da data final: ${dateOnly.toISOString().split('T')[0]} > ${endDateOnly.toISOString().split('T')[0]}`);
+          continue;
+        }
       }
+      
+      console.log(`✅ [API] Registro ${row['VI ALA']} passou no filtro de data`);
       
       const periodKey = getPeriodKey(date, period);
       if (!periodKey) continue;
