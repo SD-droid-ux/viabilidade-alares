@@ -823,7 +823,7 @@
           <div class="report-section">
             <div class="report-header">
               <div class="header-content">
-                <div>
+                <div class="header-title-section">
                   <h1>Evolução Temporal</h1>
                   <p class="subtitle">Quantidade de VI ALAs gerados ao longo do tempo</p>
                 </div>
@@ -1336,6 +1336,17 @@
 
   .report-header {
     margin-bottom: 2rem;
+  }
+
+  .header-content {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 1rem;
+  }
+
+  .header-title-section {
+    flex: 1;
   }
 
   .report-header h1 {
