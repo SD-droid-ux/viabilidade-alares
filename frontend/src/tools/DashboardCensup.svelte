@@ -406,16 +406,25 @@
       return 'Selecionar período';
     }
     
-    const start = new Date(selectedStartDate);
-    const startFormatted = start.toLocaleDateString('pt-BR');
+    // Converter YYYY-MM-DD para DD/MM/YYYY sem problemas de timezone
+    const [year, month, day] = selectedStartDate.split('-');
+    const startFormatted = `${day}/${month}/${year}`;
     
     if (dateFilterMode === 'single' || !selectedEndDate) {
       return startFormatted;
     }
     
-    const end = new Date(selectedEndDate);
-    const endFormatted = end.toLocaleDateString('pt-BR');
+    // Converter YYYY-MM-DD para DD/MM/YYYY sem problemas de timezone
+    const [endYear, endMonth, endDay] = selectedEndDate.split('-');
+    const endFormatted = `${endDay}/${endMonth}/${endYear}`;
     return `${startFormatted} - ${endFormatted}`;
+  }
+  
+  // Função para formatar data YYYY-MM-DD para DD/MM/YYYY
+  function formatDateString(dateStr) {
+    if (!dateStr) return '';
+    const [year, month, day] = dateStr.split('-');
+    return `${day}/${month}/${year}`;
   }
   
   // Função para obter string de data no formato YYYY-MM-DD
@@ -848,9 +857,9 @@
                 <div class="chart-container">
                   <h2>
                     {#if selectedStartDate && (!selectedEndDate || selectedStartDate === selectedEndDate)}
-                      Evolução por Hora - {new Date(selectedStartDate).toLocaleDateString('pt-BR')}
+                      Evolução por Hora - {formatDateString(selectedStartDate)}
                     {:else if selectedStartDate && selectedEndDate}
-                      Evolução por Dia - {new Date(selectedStartDate).toLocaleDateString('pt-BR')} a {new Date(selectedEndDate).toLocaleDateString('pt-BR')}
+                      Evolução por Dia - {formatDateString(selectedStartDate)} a {formatDateString(selectedEndDate)}
                     {:else}
                       Evolução Temporal
                     {/if}
